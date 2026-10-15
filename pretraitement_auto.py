@@ -14,12 +14,58 @@ feuille) — ces trois fonctions d'origine restent telles quelles, inchangées,
 au cas où il faille revenir dessus.
 """
 
+import io
 import os
+import shutil
+import subprocess
+import tempfile
 
 import openpyxl
 
 import pretraitement as pt
 import pretraitement_grada as pg
+
+_SIGNATURE_OLE2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+def _est_ancien_xls(chemin_source):
+    """Détecte un .xls (binaire OLE2, Excel 97-2003) à partir de sa signature,
+    indépendamment du nom de fichier (fiable même sur un BytesIO sans nom)."""
+    _reseek(chemin_source)
+    if hasattr(chemin_source, "read"):
+        debut = chemin_source.read(8)
+        _reseek(chemin_source)
+    else:
+        with open(chemin_source, "rb") as f:
+            debut = f.read(8)
+    return debut == _SIGNATURE_OLE2
+
+
+def convertit_xls_en_xlsx(chemin_source):
+    """Convertit un .xls ancien en .xlsx via LibreOffice en mode headless
+    (préserve la mise en forme et les cellules fusionnées, contrairement à
+    une conversion xlrd/openpyxl qui ne recopierait que les valeurs). Renvoie
+    un BytesIO positionné au début, prêt à être relu par openpyxl."""
+    _reseek(chemin_source)
+    with tempfile.TemporaryDirectory() as dossier_tmp:
+        chemin_xls = os.path.join(dossier_tmp, "source.xls")
+        if hasattr(chemin_source, "read"):
+            with open(chemin_xls, "wb") as f:
+                f.write(chemin_source.read())
+        else:
+            shutil.copy(chemin_source, chemin_xls)
+
+        resultat = subprocess.run(
+            ["soffice", "--headless", "--convert-to", "xlsx", "--outdir", dossier_tmp, chemin_xls],
+            capture_output=True, text=True, timeout=120,
+        )
+        chemin_xlsx = os.path.join(dossier_tmp, "source.xlsx")
+        if resultat.returncode != 0 or not os.path.exists(chemin_xlsx):
+            raise ValueError(
+                f"Échec de la conversion .xls -> .xlsx via LibreOffice : {resultat.stderr.strip()}"
+            )
+        with open(chemin_xlsx, "rb") as f:
+            return io.BytesIO(f.read())
 
 
 def _ligne_entete_canonique(ws):
@@ -169,15 +215,35 @@ def transforme_automatiquement(chemin_source, chemin_sortie, nom_fichier=None):
 
     chemin_source accepte aussi bien un chemin sur disque qu'un fichier en
     mémoire (BytesIO) ; dans ce dernier cas, nom_fichier sert à nommer le
-    fournisseur (impossible à déduire d'un BytesIO)."""
+    fournisseur (impossible à déduire d'un BytesIO).
+
+    Si le fichier déposé est un ancien .xls, il est d'abord converti en
+    .xlsx (LibreOffice headless) avant toute détection de format — dans ce
+    cas, même si le résultat est déjà au format canonique, chemin_sortie
+    reçoit quand même le .xlsx converti (nb_lignes vaut alors 0, pas None,
+    pour signaler à l'appelant qu'il doit relire depuis chemin_sortie)."""
     _reseek(chemin_source)
-    format_detecte = detecte_format(chemin_source)
     nom_fournisseur = nom_fichier or (
         os.path.splitext(os.path.basename(chemin_source))[0]
         if isinstance(chemin_source, str) else "Fournisseur"
     )
 
+    foi_convertido_de_xls = _est_ancien_xls(chemin_source)
+    if foi_convertido_de_xls:
+        chemin_source = convertit_xls_en_xlsx(chemin_source)
+
+    format_detecte = detecte_format(chemin_source)
+
     if format_detecte == "canonique":
+        if foi_convertido_de_xls:
+            _reseek(chemin_source)
+            conteudo = chemin_source.read()
+            if hasattr(chemin_sortie, "write"):
+                chemin_sortie.write(conteudo)
+            else:
+                with open(chemin_sortie, "wb") as f:
+                    f.write(conteudo)
+            return "canonique", 0
         return "canonique", None
     if format_detecte == "regal":
         _reseek(chemin_source)

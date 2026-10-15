@@ -27,7 +27,7 @@ st.caption(
 
 fichiers_deposes = st.file_uploader(
     "Fichiers à auditer",
-    type=["xlsx"],
+    type=["xlsx", "xls"],
     accept_multiple_files=True,
 )
 
@@ -67,12 +67,18 @@ def calcule_resultats(fichiers_deposes):
             )
             continue
 
-        if formato != "canonique":
+        if nb_lignes is not None:
             contenu = tampon_sortie.getvalue()
-            notes_pretraitement.append(
-                f"**{fichier.name}** reconnu comme format « {formato} » et transformé "
-                f"automatiquement ({nb_lignes} lignes) avant l'audit."
-            )
+            if formato != "canonique":
+                notes_pretraitement.append(
+                    f"**{fichier.name}** reconnu comme format « {formato} » et transformé "
+                    f"automatiquement ({nb_lignes} lignes) avant l'audit."
+                )
+            else:
+                notes_pretraitement.append(
+                    f"**{fichier.name}** était en .xls (ancien format), converti en .xlsx "
+                    "automatiquement avant l'audit."
+                )
 
         try:
             wb_valeurs = audit.openpyxl.load_workbook(io.BytesIO(contenu), data_only=True)
