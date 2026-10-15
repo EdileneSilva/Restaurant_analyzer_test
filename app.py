@@ -2,11 +2,12 @@
 Application de démonstration (Streamlit) — Audit de cohérence unités/prix
 ==========================================================================
 
-Dépose un ou plusieurs fichiers .xlsx déjà dans le même format que ceux de
-raw_data/ ("Base article groupement N", "MDC_IMPORT_MARCHE"...), lance
-l'audit (exactement la même logique que audit_geral.py), et permet de
-télécharger les fichiers audités + les rapports — sans rien écrire sur le
-serveur, tout se fait en mémoire.
+Dépose un ou plusieurs fichiers .xlsx — déjà au format canonique ("Base article
+groupement N", "MDC_IMPORT_MARCHE"...), ou dans un format reconnu (REGAL, famille
+GRADA, ancien .xls) qui sera converti automatiquement — lance l'audit
+(exactement la même logique que audit_geral.py), et permet de télécharger les
+fichiers audités + les rapports — sans rien écrire sur le serveur, tout se fait
+en mémoire.
 """
 
 import io
@@ -20,9 +21,11 @@ st.set_page_config(page_title="Audit BPU — démo", page_icon="📋", layout="w
 
 st.title("📋 Audit de cohérence unités/prix")
 st.caption(
-    "Dépose un ou plusieurs fichiers .xlsx au même format que ceux de raw_data/ "
-    "(« Base article groupement N », « MDC_IMPORT_MARCHE »...). Rien n'est écrit sur le "
-    "serveur : tout se passe en mémoire, pour cette session seulement."
+    "Dépose un ou plusieurs fichiers .xlsx : déjà au format canonique "
+    "(« Base article groupement N », « MDC_IMPORT_MARCHE »...), ou dans un format "
+    "reconnu (REGAL, famille GRADA, ancien .xls) — converti automatiquement avant "
+    "l'audit. Rien n'est écrit sur le serveur : tout se passe en mémoire, pour cette "
+    "session seulement."
 )
 
 fichiers_deposes = st.file_uploader(

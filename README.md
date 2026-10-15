@@ -23,15 +23,25 @@ fournisseurs qui ne sont pas déjà dans ce format.
 
 ## Dossiers de données
 
-- `raw_data/`, `transformed_files/` — entrée/sortie du mode CLI de `audit_geral.py`.
-  Vides par défaut ; à remplir uniquement si vous lancez le script directement en ligne
-  de commande plutôt que via l'app Streamlit.
-- `to_format/` — échantillons reçus du métier dont le format n'est pas encore pris en
-  charge automatiquement (nécessitent un nouveau script de transformation).
-- `to_inspect/` — échantillons reçus du métier dont le statut n'était pas encore déterminé
-  au moment de la réception.
+- `a_inspecter/` — fichiers reçus du métier dont le statut n'est pas encore déterminé.
+  C'est ici qu'arrivent les nouveaux fichiers, le temps de vérifier leur format. Ceux déjà
+  au format canonique sont ensuite déplacés tels quels vers `pret_pour_audit/`.
+- `a_formater/` — fichiers confirmés comme n'étant pas encore pris en charge
+  automatiquement (nécessitent un nouveau script de transformation). Une fois le script
+  écrit (ou via `pretraitement_auto.py`), le résultat transformé va dans
+  `pret_pour_audit/`.
+- `pret_pour_audit/` — dossier d'entrée du mode CLI de `audit_geral.py`
+  (`DOSSIER_ENTREE`) : uniquement des fichiers déjà au format canonique, prêts à être
+  audités directement (`python audit_geral.py`).
+- `transformed_files/` — sortie du mode CLI de `audit_geral.py` (fichiers audités +
+  rapports).
 - `useful_stuff/` — matériel de référence (pas des échantillons à auditer) : documents et
   modèles utilisés par l'ancienne référente du traitement manuel, pouvant être réutilisés.
+
+> Ancien nom `raw_data/` → renommé `pret_pour_audit/` ; `to_format/` → `a_formater/` ;
+> `to_inspect/` → `a_inspecter/` (2026-10-15, pour un nommage cohérent avec le reste du
+> projet et pour distinguer clairement les deux flux : audit direct vs. transformation
+> avant audit).
 
 Le détail fichier par fichier (source, date de réception, statut, anonymisation) est dans
 [`inventaire_echantillons.csv`](inventaire_echantillons.csv) — ne pas dupliquer cette
