@@ -39,8 +39,7 @@ fournisseurs qui ne sont pas déjà dans ce format.
   modèles utilisés par l'ancienne référente du traitement manuel, pouvant être réutilisés.
 
 Le détail fichier par fichier (source, date de réception, statut, anonymisation) est dans
-[`inventaire_echantillons.csv`](inventaire_echantillons.csv) — ne pas dupliquer cette
-information ici, seulement la convention de chaque dossier.
+[`inventaire_echantillons.csv`](inventaire_echantillons.csv).
 
 ## Lancer l'app
 
