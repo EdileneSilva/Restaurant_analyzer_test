@@ -1,4 +1,6 @@
 *.xlsx
+*.xls
+*.jpg
 venv/
 __pycache__/
 *.pyc

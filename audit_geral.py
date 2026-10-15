@@ -2,7 +2,7 @@
 Audit de cohérence unités/prix — GÉNÉRALISÉ à tous les fichiers "Base article"
 ================================================================================
 
-Ce script traite automatiquement TOUS les fichiers .xlsx du dossier raw_data/, quel que
+Ce script traite automatiquement TOUS les fichiers .xlsx du dossier pret_pour_audit/, quel que
 soit leur format exact (nombre de colonnes, présence ou non d'une colonne "Circuit court",
 1, 2 ou 3 blocs Fournisseur remplis...) — les colonnes sont repérées par leur EN-TÊTE
 (texte), pas par leur numéro, ce qui permet de traiter aussi bien les fichiers
@@ -32,7 +32,7 @@ Les deux SEULES valeurs que ce script écrit réellement (jamais un prix) :
 
 Usage :
     python audit_geral.py
-    (lit tous les .xlsx de raw_data/, écrit les fichiers audités + rapports dans
+    (lit tous les .xlsx de pret_pour_audit/, écrit les fichiers audités + rapports dans
     transformed_files/)
 """
 
@@ -53,7 +53,7 @@ from openpyxl.styles import PatternFill, Font, Alignment
 # ============================================================================
 
 DOSSIER_PROJET = os.path.dirname(os.path.abspath(__file__))
-DOSSIER_ENTREE = os.path.join(DOSSIER_PROJET, "raw_data")
+DOSSIER_ENTREE = os.path.join(DOSSIER_PROJET, "pret_pour_audit")
 DOSSIER_SORTIE = os.path.join(DOSSIER_PROJET, "transformed_files")
 
 # ============================================================================
@@ -1107,7 +1107,7 @@ def construit_indice_prix_depuis_classeurs(classeurs):
 
 
 def construit_indice_prix(dossier_entree):
-    """Parcourt, EN LECTURE SEULE, tous les fichiers de raw_data/ pour relever tous les prix
+    """Parcourt, EN LECTURE SEULE, tous les fichiers de pret_pour_audit/ pour relever tous les prix
     de référence (BPU) observés, toutes lignes et tous fournisseurs confondus, dans tous les
     fichiers, regroupés de deux façons :
       - 'produit' : (unité de base, désignation de l'article normalisée) — comparaison la
