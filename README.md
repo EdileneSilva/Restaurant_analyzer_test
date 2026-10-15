@@ -38,11 +38,6 @@ fournisseurs qui ne sont pas déjà dans ce format.
 - `useful_stuff/` — matériel de référence (pas des échantillons à auditer) : documents et
   modèles utilisés par l'ancienne référente du traitement manuel, pouvant être réutilisés.
 
-> Ancien nom `raw_data/` → renommé `pret_pour_audit/` ; `to_format/` → `a_formater/` ;
-> `to_inspect/` → `a_inspecter/` (2026-10-15, pour un nommage cohérent avec le reste du
-> projet et pour distinguer clairement les deux flux : audit direct vs. transformation
-> avant audit).
-
 Le détail fichier par fichier (source, date de réception, statut, anonymisation) est dans
 [`inventaire_echantillons.csv`](inventaire_echantillons.csv) — ne pas dupliquer cette
 information ici, seulement la convention de chaque dossier.
