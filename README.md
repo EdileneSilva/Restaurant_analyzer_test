@@ -10,7 +10,7 @@ fournisseurs qui ne sont pas déjà dans ce format.
   automatique si besoin, puis audit. Rien n'est écrit sur le serveur, tout se fait en
   mémoire.
 - `audit_geral.py` — le script d'audit lui-même (logique de cohérence unités/prix). Peut
-  aussi être lancé en CLI (`python audit_geral.py`) : lit tous les `.xlsx` de `raw_data/`
+  aussi être lancé en CLI (`python audit_geral.py`) : lit tous les `.xlsx` de `pret_pour_audit/`
   et écrit les fichiers audités + rapports dans `transformed_files/`.
 - `pretraitement.py` — transforme les catalogues au format REGAL vers le format canonique.
 - `pretraitement_grada.py` — transforme les catalogues de la famille GRADA (AGRICOURT, VDR,
