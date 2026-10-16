@@ -117,6 +117,56 @@ confirmés dans `pret_pour_audit/`), gravité pressentie, et si une règle exist
   sans aucun poids — 3 lignes concernées sur les 11 fichiers testés, voir
   `RE_CONTENANT_SEUL_SANS_POIDS` dans `audit_geral.py`).
 
+### 17. Conditionnement vide pour un produit vendu au poids (CAS 2, "VRAC")
+- **Exemple réel** : `Base IANOR AGAPE 16 Viandes fraiches (1).xlsx` (29 lignes, 5-38) et
+  `Base IANOR AGAPE 16 Volailles (1) (1).xlsx` (28 lignes, 3-28) — Conditionnement vide, mais
+  Unité de référence = Unité de commande (KG), et prix de référence = prix de commande
+  exactement : pas une donnée manquante, le produit est vendu au poids sans récipient fixe
+  (CAS 2 documenté dans `useful_stuff/Exemples unités et prix 6.xlsx` — viandes, poissons,
+  fromages, fruits et légumes).
+- **Correction appliquée** : Conditionnement rempli à `'VRAC'`, avec commentaire expliquant
+  pourquoi (pas une anomalie, juste l'absence de récipient).
+- **Gravité pressentie** : information, pas une erreur.
+- **Couverte par le code** : oui (ajouté le 2026-10-16).
+
+### 18. Désignation fournisseur vide (prix renseigné malgré tout)
+- **Exemple réel** : `MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx`, 260 occurrences — semble
+  être une convention de ce fichier (colonne jugée redondante avec Désignation de l'article),
+  pas un oubli systématique.
+- **Décision provisoire** : copier la valeur de Désignation de l'article en attendant une
+  clarification avec le métier — **pas encore implémenté**, à faire une fois la discussion
+  métier tranchée.
+- **Gravité pressentie** : avertissement.
+- **Couverte par le code** : non (décision en attente).
+
+### 19. Origine non reconnue ou ambiguë
+- **Exemple réel** : 88 occurrences sur les 11 fichiers testés — régions au lieu d'un pays
+  ("Charente", "Sud-Ouest"), valeurs combinées ("FRANCE, UE", "UE/non UE", "Islande/Iles
+  féroé"), faute de frappe ("Esspagne"), qualificatif non standard ("transformé en France").
+- **Gravité pressentie** : avertissement (ambiguïté à clarifier par une personne, jamais
+  corrigée automatiquement — contrairement à `pretraitement.traite_origine`, qui lui réécrit
+  en 'France').
+- **Couverte par le code** : oui (ajouté le 2026-10-16, `verifie_origine` dans
+  `audit_geral.py` — liste de pays volontairement élargie par rapport à celle de
+  `pretraitement.py`, observée directement dans les fichiers réels).
+
+### 20. Poids à l'unité de référence écrit en texte libre au lieu d'un nombre
+- **Exemple réel** : 219 lignes sur les fichiers `Base IANOR AGAPE 16 Epicerie/Produits
+  laitiers/Surgelé.xlsx` (+ 1 ligne dans `MDC_IMPORT_MARCHE`, ligne 91, "unité") — au lieu
+  d'un nombre, la cellule contient du texte comme `'seau de 5 kg'`, `'100 g'`, `'boîte 3/1'`.
+  Avant correction, ce texte était traité comme "déjà rempli" (il n'est pas vide), masquant
+  silencieusement une vraie incohérence de type.
+- **Correction appliquée** : réutilisation du même parseur que pour le Conditionnement (même
+  vocabulaire de récipients) — 152 valeurs converties automatiquement en nombre (kg/L), 67
+  non convertibles (codes de contenance "boîte N/N" sans équivalent poids connu, ou "unité")
+  signalées pour correction manuelle.
+- **Bug corrigé au passage** : "boîte" (avec accent) ne correspondait à aucun mot de récipient
+  connu (liste écrite sans accent, "boite") — corrigé, les deux formes sont maintenant
+  reconnues.
+- **Gravité pressentie** : bloquante avant correction (problème de type non détecté) ;
+  information pour les 152 converties, avertissement pour les 67 restantes.
+- **Couverte par le code** : oui (ajouté le 2026-10-16).
+
 ## Erreurs observées (TT-03/TT-04) mais PAS ENCORE couvertes par le code
 
 ### 11. Ligne entièrement vide en fin de tableau (artefact Excel)
@@ -155,11 +205,11 @@ ont des résultats connus et stables (vérifiés à plusieurs reprises) :
 
 | Fichier | Lignes avec incohérence | Cellules marquées |
 |---|---|---|
-| Base article groupement 1 | 124 | 255 |
+| Base article groupement 1 | 125 | 256 |
 | Base article groupement 2 | 247 | 427 |
 | Base article groupement 3 | 179 | 325 |
-| Base article groupement 4 | 147 | 301 |
-| MDC_IMPORT_MARCHE | 213 | 351 |
+| Base article groupement 4 | 148 | 302 |
+| MDC_IMPORT_MARCHE | 214 | 352 |
 
 Ces chiffres servent de résultat attendu pour TT-09 (tests de non-régression) : si une
 future modification du code change ces totaux sans raison identifiée, c'est un signal
@@ -173,3 +223,11 @@ de régression à investiguer.
 > précise) — seul le nombre de cellules marquées a augmenté. Groupement 3, 4 et
 > MDC_IMPORT_MARCHE sont restés strictement identiques (aucune ligne concernée par cette
 > règle), confirmant qu'elle n'a aucun effet de bord ailleurs.
+
+> Historique (2026-10-16) : groupement 1 (255→256, 124→125) et groupement 4 (301→302,
+> 147→148) suite à l'ajout de la règle n°19 (Origine non reconnue/ambiguë) : chacun a 1 ligne
+> avec Origine "FRANCE, UE" (valeur combinée). MDC_IMPORT_MARCHE (351→352, 213→214) suite à
+> la règle n°20 (Poids en texte libre) : ligne 91, "unité". Groupement 2 et 3 inchangés. La
+> règle n°17 (VRAC) ne touche aucun des 5 fichiers de référence — elle ne concerne que les
+> fichiers IANOR AGAPE (Viandes fraîches, Volailles), donc pas de ligne dans ce tableau pour
+> elle.

@@ -40,6 +40,7 @@ import os
 import re
 import statistics
 import sys
+import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import first_scripts.first_attempt_v2_prototype as motor  # noqa: E402  (règles de cohérence déjà validées)
@@ -64,7 +65,8 @@ DOSSIER_SORTIE = os.path.join(DOSSIER_PROJET, "transformed_files")
 # ============================================================================
 
 MOTS_CONTENANT = ["sac", "seau", "brique", "barquette", "barq", "bidon", "outre", "colis",
-                  "pot", "sachet", "carton", "poche", "cageot", "boite", "filet", "bouteille",
+                  "pot", "sachet", "carton", "poche", "cageot", "boite", "boîte", "filet",
+                  "bouteille",
                   "bouteile",  # faute de frappe fréquente ('BOUTEILES', 1 seul L)
                   "caisse", "plaque", "plateau", "clayette", "pack", "gourde", "botte"]
 _MOTS_REGEX = "pi[eè]ce|" + "|".join(MOTS_CONTENANT)
@@ -101,7 +103,7 @@ motor.CONTENANT_ABREGE = {
     "barquette": "BARQUETTE", "barq": "BARQUETTE",
     "bidon": "BIDON", "outre": "OUTRE", "colis": "COLIS", "pot": "POT", "sachet": "SACHET",
     "carton": "CARTON", "poche": "POCHE", "bouteille": "BOUTEILLE", "bouteile": "BOUTEILLE",
-    "cageot": "CAGEOT", "boite": "BOITE", "filet": "FILET",
+    "cageot": "CAGEOT", "boite": "BOITE", "boîte": "BOITE", "filet": "FILET",
     "caisse": "CAISSE", "plaque": "PLAQUE", "plateau": "PLATEAU", "clayette": "CLAYETTE",
 }
 
@@ -419,7 +421,7 @@ def determine_base_et_quantite(conditionnement):
 
 _MOTS_CONTENANT_CANONIQUES = [
     "sac", "seau", "brique", "barquette", "bidon", "outre", "colis", "pot", "sachet",
-    "carton", "poche", "cageot", "boite", "filet", "bouteille", "caisse", "plaque",
+    "carton", "poche", "cageot", "boite", "boîte", "filet", "bouteille", "caisse", "plaque",
     "plateau", "clayette", "piece",
 ]
 _MOTS_CONTENANT_CONNUS = set(MOTS_CONTENANT) | {"piece", "pièce"}
@@ -957,6 +959,46 @@ def reconsidere_prix_inexplique(resultat, unite_ref, conditionnement, unite_cmd,
             "vérifier manuellement (pas recalculé automatiquement, le format n'est pas standard).")
 
 
+# ============================================================================
+# ORIGINE — contrairement à pretraitement.py (qui corrige automatiquement une valeur non
+# reconnue en 'France'), l'audit ne modifie JAMAIS la valeur : seulement un signalement, à
+# charge d'une personne de corriger. Liste de pays volontairement plus large que celle de
+# pretraitement.py (observée directement dans les fichiers de référence).
+# ============================================================================
+ORIGINES_LARGES = {"france", "ue", "union europeenne", "hors ue", "hors union europeenne", "monde"}
+PAYS_ORIGINE_CONNUS = {
+    "espagne", "italie", "belgique", "chine", "royaume-uni", "royaume uni", "chili", "perou",
+    "irlande", "egypte", "asie", "allemagne", "portugal", "pays-bas", "maroc", "pologne",
+    "canada", "costa rica", "inde", "malaisie", "norvege", "bangladesh", "bresil", "usa",
+    "etats-unis", "nouvelle zelande", "islande", "grece",
+}
+
+
+def _normalise_origine(valeur):
+    texte = re.sub(r"\(.*?\)", "", str(valeur)).strip().lower()  # retire qualificatif entre parenthèses, ex: "France (79)"
+    texte = "".join(c for c in unicodedata.normalize("NFD", texte) if unicodedata.category(c) != "Mn")
+    return re.sub(r"\s+", " ", texte).strip()
+
+
+def verifie_origine(valeur):
+    """Vérifie qu'Origine est soit une des 4 grandes catégories (France/UE/Hors UE/Monde),
+    soit un seul pays reconnu. Renvoie (True, None) si reconnu/vide, (False, message) sinon —
+    ne modifie jamais la valeur, juste un signalement."""
+    if not valeur:
+        return True, None  # vide : optionnelle (cf. format_cible.md), pas le rôle de cette règle
+    norm = _normalise_origine(valeur)
+    if norm in ORIGINES_LARGES or norm in PAYS_ORIGINE_CONNUS:
+        return True, None
+    if any(sep in norm for sep in (",", "/")):
+        return False, (
+            f"Origine ('{valeur}') semble combiner plusieurs valeurs — préciser laquelle "
+            "s'applique réellement à ce produit (une seule valeur attendue).")
+    return False, (
+        f"Origine ('{valeur}') non reconnue : ni une des 4 catégories (France, UE, Hors UE, "
+        "Monde), ni un pays de la liste connue — vérifier l'orthographe, ou que ce pays existe "
+        "bien (liste à élargir si besoin).")
+
+
 def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
     """Copie de motor.verifie_unite_commande, avec des corrections :
     1. Vocabulaire étendu (cageot/boite/filet/caisse/plaque/plateau/clayette...) ;
@@ -981,7 +1023,7 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
 
     mots_types = ["sac", "pièce", "piece", "seau", "brique", "barquette", "barq", "bidon",
                   "outre", "colis", "pot", "sachet", "carton", "poche", "bouteille", "bouteile",
-                  "cageot", "boite", "filet", "caisse", "plaque", "plateau", "clayette"]
+                  "cageot", "boite", "boîte", "filet", "caisse", "plaque", "plateau", "clayette"]
     trouve = [m for m in mots_types if m in texte_combine]
     if not trouve:
         return True, None
@@ -1083,11 +1125,23 @@ def localise_feuille_et_colonnes(ws):
         return None
 
     fournisseurs = []
+    cols_fournisseur_triees = sorted(c for _, c in fournisseurs_col)
     for numero, col in sorted(fournisseurs_col):
+        # Origine n'est pas à un décalage fixe par rapport au bloc : le bloc Fournisseur 3 n'a
+        # pas de colonne "Circuit court", ce qui décale toutes les colonnes suivantes d'une
+        # position par rapport aux blocs 1/2 — on la retrouve donc par son texte d'en-tête,
+        # cherchée seulement dans la plage de colonnes de CE bloc (jusqu'au bloc suivant).
+        prochaine_col = next((c2 for c2 in cols_fournisseur_triees if c2 > col), ws.max_column + 1)
+        col_origine = None
+        for c2 in range(col + 1, prochaine_col):
+            if _normalise_entete(ws.cell(row=ligne_entete, column=c2).value) == "origine":
+                col_origine = c2
+                break
         fournisseurs.append({
             "nom": f"Fournisseur {numero}",
             "cond": col + 1, "desig_fourn": col + 2, "ref": col + 3,
             "prix_ref": col + 4, "unite_cmd": col + 5, "prix_cmd": col + 6,
+            "origine": col_origine,
         })
 
     derniere_colonne_cle = max(f["prix_cmd"] for f in fournisseurs) + 6  # marge (Local/Bio/.../Indice I0)
@@ -1329,6 +1383,28 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
 
     total = 0
 
+    # Produit vendu au poids sans conditionnement fixe (CAS 2 documenté par le métier dans
+    # useful_stuff/Exemples unités et prix 6.xlsx — viandes/poissons/fromages/fruits et
+    # légumes) : Conditionnement vide, Unité de référence = Unité de commande (KG ou L), et
+    # prix de référence = prix de commande (aucune conversion nécessaire) — ce n'est pas une
+    # donnée manquante, juste l'absence de récipient fixe. Rempli à 'VRAC' pour le distinguer
+    # d'une vraie case vide (qui, elle, reste un problème potentiel à vérifier manuellement).
+    if (not conditionnement and prix_ref is not None and prix_cmd is not None
+            and unite_ref and motor.normalise_texte(unite_ref) in ("kg", "l", "litre")
+            and unite_cmd and motor.normalise_texte(unite_cmd) == motor.normalise_texte(unite_ref)
+            and prix_ref == prix_cmd):
+        cel_cond = ws.cell(row=ligne, column=fournisseur["cond"])
+        cel_cond.value = "VRAC"
+        cel_cond.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
+                                     end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+        cel_cond.comment = Comment(
+            f"Conditionnement renseigné à 'VRAC' : Unité de référence et Unité de commande "
+            f"sont déjà identiques ('{unite_ref}'), et le prix de référence = prix de commande "
+            f"({prix_ref}) — produit vendu au poids, sans récipient fixe (pas une donnée "
+            "manquante).", AUTEUR_COMMENTAIRE)
+        total += 1
+        conditionnement = "VRAC"
+
     # Référence de plage de cellules Excel ('H33:H66') collée par erreur au milieu du
     # Conditionnement : aucune ambiguïté possible (ce n'est jamais du texte produit légitime),
     # donc on corrige directement la cellule, contrairement au reste du Conditionnement qui
@@ -1550,6 +1626,15 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                    fournisseur["nom"], message)
             total += 1
 
+    col_origine = fournisseur.get("origine")
+    if col_origine:
+        valeur_origine = ws_valeurs.cell(row=ligne, column=col_origine).value
+        ok, message = verifie_origine(valeur_origine)
+        if not ok:
+            marque(ws.cell(row=ligne, column=col_origine), motor.COULEUR_A_VERIFIER,
+                   fournisseur["nom"], message)
+            total += 1
+
     if reference and RE_REFERENCES_MULTIPLES.search(str(reference)):
         marque(ws.cell(row=ligne, column=fournisseur["ref"]), motor.COULEUR_A_VERIFIER,
                fournisseur["nom"],
@@ -1729,6 +1814,7 @@ TITRES_CATEGORIES_RAPPORT = {
     "prix_cmd": "Prix de commande incohérent / inexpliqué",
     "poids_rempli": "Poids à l'unité de référence — rempli automatiquement",
     "valeurs_manquantes": "Valeurs manquantes (prix de référence ou de commande)",
+    "origine": "Origine non reconnue / ambiguë",
 }
 
 
@@ -1743,6 +1829,7 @@ def calcule_categories_rapport(ws, ws_valeurs, ligne_debut, col_designation, col
     colonnes_prix_ref = {f["prix_ref"] for f in fournisseurs}
     colonnes_unite_cmd = {f["unite_cmd"] for f in fournisseurs}
     colonnes_prix_cmd = {f["prix_cmd"] for f in fournisseurs}
+    colonnes_origine = {f["origine"] for f in fournisseurs if f.get("origine")}
 
     for ligne in range(ligne_debut, ws.max_row + 1):
         designation = ws_valeurs.cell(row=ligne, column=col_designation).value
@@ -1775,6 +1862,8 @@ def calcule_categories_rapport(ws, ws_valeurs, ligne_debut, col_designation, col
                     categories["valeurs_manquantes"].append((ligne, designation, texte))
                 else:
                     categories["prix_cmd"].append((ligne, designation, texte))
+            elif colonne in colonnes_origine:
+                categories["origine"].append((ligne, designation, texte))
 
     return categories
 
@@ -1888,6 +1977,32 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
         poids_ref = ws_valeurs.cell(row=ligne, column=col_poids_ref).value if col_poids_ref else None
         lot_valor = ws_valeurs.cell(row=ligne, column=col_lot).value if col_lot else None
 
+        # "Poids à l'unité de référence" écrit en texte libre (ex: 'seau de 5 kg', '100 g')
+        # au lieu d'un nombre : réutilise le même parseur que pour le Conditionnement (même
+        # vocabulaire de récipients) pour en extraire la valeur numérique. Sans ça, le texte
+        # est traité comme "déjà rempli" (il n'est pas vide), ce qui masquait silencieusement
+        # une vraie incohérence de type.
+        poids_texte_marque = False
+        if poids_ref and not isinstance(poids_ref, (int, float)):
+            resultat_texte = determine_base_et_quantite(nettoie_conditionnement(str(poids_ref)))
+            cel_poids = ws.cell(row=ligne, column=col_poids_ref)
+            if resultat_texte and resultat_texte[0] in ("kg", "l", "litre"):
+                quantite_texte = round(resultat_texte[1], 3)
+                cel_poids.value = quantite_texte
+                cel_poids.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
+                                              end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+                cel_poids.comment = Comment(
+                    f"Poids à l'unité de référence interprété à partir du texte d'origine "
+                    f"('{poids_ref}') : {quantite_texte}.", AUTEUR_COMMENTAIRE)
+                poids_ref = quantite_texte
+            else:
+                marque(cel_poids, motor.COULEUR_A_VERIFIER, None,
+                       f"Poids à l'unité de référence ('{poids_ref}') est du texte, pas un "
+                       "nombre, et n'a pas pu être interprété automatiquement — à convertir "
+                       "manuellement en kg/L.")
+            stats["marques"] += 1
+            poids_texte_marque = True
+
         if not unite_ref:
             marque(ws.cell(row=ligne, column=col_unite_ref), motor.COULEUR_A_VERIFIER, None,
                    "Unité de référence vide — à compléter manuellement.")
@@ -1902,7 +2017,7 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
         if maj_d:
             ws.cell(row=ligne, column=col_unite_ref).value = maj_d
 
-        ligne_a_un_probleme = False
+        ligne_a_un_probleme = poids_texte_marque
         for fournisseur in fournisseurs:
             n = audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                                     fournisseur, col_poids_ref, lot_valor, indice_prix,
