@@ -107,6 +107,12 @@ motor.CONTENANT_ABREGE = {
     "caisse": "CAISSE", "plaque": "PLAQUE", "plateau": "PLATEAU", "clayette": "CLAYETTE",
 }
 
+# Abréviations déjà utilisées telles quelles dans certains fichiers sources (ex: le fichier
+# MDC abrège systématiquement "barquette" en "BQT") — si l'unité de commande actuelle est déjà
+# une de ces abréviations reconnues du bon récipient, ce n'est pas une incohérence à corriger
+# vers le mot en entier, juste une convention d'écriture différente.
+ABREVIATIONS_CONTENANT_RECONNUES = {"bqt": "barquette"}
+
 # "SV" / "S/V" (sous-vide) apparaît comme mot inséré entre le récipient et sa quantité
 # ('PIECE SV DE 7 KG') — on le retire avant toute analyse du Conditionnement, ce qui
 # simplifie tous les motifs ci-dessous.
@@ -706,6 +712,26 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                 ratio_prix = prix_cmd / prix_ref
                 tolerance_qte = max(0.05, 0.05 * quantite)
 
+                # Ratio ≈ 1 (prix de commande = prix de référence) avec une unité de référence
+                # à la pièce : confirmé à plusieurs reprises sur des fichiers réels (ex: 'PIECE
+                # DE 2KG', 'BARQUETTE DE 300G' dont le prix de référence et le prix de commande
+                # sont identiques) — le produit est vendu et payé à la pièce/au récipient entier,
+                # le conditionnement ne fait que PRÉCISER son poids, ce n'est pas un prix au
+                # poids à recalculer. On renseigne juste le poids (E) si absent, sans toucher
+                # D/K/L.
+                if (base_ref_norm_precoce in ("pc", "pièce", "piece", "unite", "unité")
+                        and abs(ratio_prix - 1) <= motor.TOLERANCE_RATIO):
+                    r = motor.Resultat()
+                    if not poids_ref:
+                        r.nouveau_e = round(quantite, 3)
+                        r.explication_e = (
+                            f"Poids à l'unité de référence renseigné à {round(quantite, 3)} "
+                            f"{base} d'après le conditionnement ('{conditionnement}') : le prix "
+                            f"de commande ({prix_cmd}) est égal au prix de référence ({prix_ref}), "
+                            "le produit est donc vendu à la pièce/au récipient entier, pas au "
+                            f"{base}.")
+                    return r
+
                 # La "Désignation fournisseur" confirme parfois une AUTRE quantité que celle
                 # lue dans le Conditionnement (ex: Conditionnement 'PIECE DE 2,1 KG' saisi avec
                 # les chiffres inversés, alors que la Désignation fournisseur dit '...1,2KGx6...'
@@ -767,13 +793,25 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                 # (arrondis, centimes) — ne rien changer évite de déranger pour rien.
                 k_change = diff_relative > 0.05
                 l_novo = motor.CONTENANT_ABREGE.get(mot, mot.upper()) if mot else None
-                # Récipient d'exactement 1 kg/L, avec une unité de commande déjà 'KG'/'L' :
-                # les deux conventions (garder KG/L, ou préciser le récipient) sont aussi
-                # valables l'une que l'autre — ne pas forcer le changement.
-                if (l_novo and abs(quantite - 1) < 0.01
-                        and motor.normalise_texte(unite_cmd) in ("kg", "l", "litre")):
-                    l_novo = None
+                # Aucun récipient nommé ('6 x 1L'...), mais chaque unité fait exactement 1
+                # kg/L : comme pour les produits à la pièce, on précise "LOT DE N" plutôt que de
+                # laisser l'unité de commande telle quelle — confirmé sur fichiers réels (ex:
+                # lait vendu en 'LOT DE 6' bouteilles de 1L chacune).
+                if l_novo is None:
+                    m_double = motor.RE_DOUBLE.match(conditionnement)
+                    if m_double:
+                        n_unites, qte_unite, _unite_texte = m_double.groups()
+                        if abs(motor._nombre(qte_unite) - 1) < 0.01:
+                            l_novo = f"LOT DE {int(n_unites)}"
                 l_change = l_novo and motor.normalise_texte(l_novo) != motor.normalise_texte(unite_cmd)
+                if l_change and mot:
+                    # L'unité de commande actuelle est déjà une abréviation reconnue du BON
+                    # récipient (ex: 'BQT' pour 'barquette' dans le fichier MDC) — ce n'est pas
+                    # une incohérence, juste une autre façon d'écrire la même chose.
+                    abrege_reconnu = ABREVIATIONS_CONTENANT_RECONNUES.get(
+                        motor.normalise_texte(unite_cmd))
+                    if abrege_reconnu == mot:
+                        l_change = False
 
                 r.nouveau_d = d_novo
                 if d_change:
@@ -1378,10 +1416,29 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
     prix_ref = ws_valeurs.cell(row=ligne, column=fournisseur["prix_ref"]).value
     prix_cmd = ws_valeurs.cell(row=ligne, column=fournisseur["prix_cmd"]).value
 
-    if reference is None and conditionnement is None and prix_ref is None and prix_cmd is None:
-        return 0  # ce fournisseur n'est simplement pas renseigné pour cette ligne
+    # Un prix écrit en texte (ex: '104.5' saisi comme chaîne, pas comme nombre) fait planter
+    # tous les calculs (prix_cmd / prix_ref) plus loin — on tente de le convertir, et si ce
+    # n'est vraiment pas un nombre, on le signale au lieu de planter.
+    total_prix_texte = 0
+    for champ, valeur in (("prix_ref", prix_ref), ("prix_cmd", prix_cmd)):
+        if isinstance(valeur, str):
+            try:
+                convertie = motor._nombre(valeur)
+            except ValueError:
+                marque(ws.cell(row=ligne, column=fournisseur[champ]), motor.COULEUR_A_VERIFIER,
+                       fournisseur["nom"],
+                       f"Valeur ('{valeur}') écrite en texte et pas reconnue comme un nombre.")
+                total_prix_texte += 1
+                convertie = None
+            if champ == "prix_ref":
+                prix_ref = convertie
+            else:
+                prix_cmd = convertie
 
-    total = 0
+    if reference is None and conditionnement is None and prix_ref is None and prix_cmd is None:
+        return total_prix_texte  # ce fournisseur n'est simplement pas renseigné pour cette ligne
+
+    total = total_prix_texte
 
     # Produit vendu au poids sans conditionnement fixe (CAS 2 documenté par le métier dans
     # useful_stuff/Exemples unités et prix 6.xlsx — viandes/poissons/fromages/fruits et
@@ -1466,8 +1523,11 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                    fournisseur["nom"], texte_cond)
             total += 1
 
-        reconsidere_recalcul_k_vs_indice_prix(resultat, indice_prix, designation, lot_valor,
-                                               prix_ref, prix_cmd)
+        # Comparaison du prix à la médiane des autres lignes/catégories désactivée à la
+        # demande — seule la cohérence interne de la ligne (unité/prix/conditionnement) reste
+        # vérifiée.
+        # reconsidere_recalcul_k_vs_indice_prix(resultat, indice_prix, designation, lot_valor,
+        #                                        prix_ref, prix_cmd)
 
         d_final = resultat.nouveau_d if resultat.nouveau_d is not None else unite_ref
         base_final_d = motor.normalise_texte(d_final) if d_final else None
@@ -1564,43 +1624,41 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                    fournisseur["nom"], resultat.commentaire_m)
             total += 1
 
-        if indice_prix:
-            base_final = _base_comparable(resultat.nouveau_d or unite_ref)
-            k_final = resultat.nouveau_k if resultat.nouveau_k is not None else prix_ref
-            # 'PC' exclu : le prix à la pièce ne dit rien du prix au kilo tant que le poids de
-            # la pièce n'est pas connu avec fiabilité (sinon D serait déjà devenu 'KG') — le
-            # comparer à d'autres prix à la pièce, de tailles de pièce différentes, n'a pas de
-            # sens et ne fait que produire de faux signalements.
-            if base_final in ("kg", "l") and k_final and k_final > 0:
-                def signale_prix_outlier(stats_groupe, seuil, portee, origine):
-                    mediane, n_observations = stats_groupe
-                    ratio = k_final / mediane
-                    if ratio <= seuil and ratio >= (1 / seuil):
-                        return 0
-                    comparaison = (f"×{round(ratio, 1)}" if ratio >= 1
-                                    else f"÷{round(1 / ratio, 1)}")
-                    marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]),
-                           motor.COULEUR_PRIX_OUTLIER, fournisseur["nom"],
-                           f"Prix de référence ({k_final} / {base_final}) très éloigné de "
-                           f"{portee} ({n_observations} lignes comparables{origine}) : médiane "
-                           f"{round(mediane, 4)} / {base_final}, soit un facteur {comparaison}. "
-                           "Peut être une erreur de saisie (zéro en trop/en moins, confusion "
-                           "d'unité...) ou un vrai écart de prix — à vérifier.")
-                    return 1
-
-                stats_produit = indice_prix["produit"].get(
-                    (base_final, motor.normalise_pour_doublon(designation)))
-                if stats_produit:
-                    total += signale_prix_outlier(
-                        stats_produit, 3, f"celui des autres lignes de '{designation}'", "")
-
-                if lot_valor:
-                    stats_categorie = indice_prix["categorie"].get(
-                        (base_final, motor.normalise_pour_doublon(lot_valor)))
-                    if stats_categorie:
-                        total += signale_prix_outlier(
-                            stats_categorie, 5, f"celui de la catégorie '{lot_valor}'",
-                            f", catégorie '{lot_valor}'")
+        # Signalement des prix "outliers" (comparés à la médiane des autres lignes/catégories)
+        # désactivé à la demande — seule la cohérence interne de la ligne reste vérifiée.
+        # if indice_prix:
+        #     base_final = _base_comparable(resultat.nouveau_d or unite_ref)
+        #     k_final = resultat.nouveau_k if resultat.nouveau_k is not None else prix_ref
+        #     if base_final in ("kg", "l") and k_final and k_final > 0:
+        #         def signale_prix_outlier(stats_groupe, seuil, portee, origine):
+        #             mediane, n_observations = stats_groupe
+        #             ratio = k_final / mediane
+        #             if ratio <= seuil and ratio >= (1 / seuil):
+        #                 return 0
+        #             comparaison = (f"×{round(ratio, 1)}" if ratio >= 1
+        #                             else f"÷{round(1 / ratio, 1)}")
+        #             marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]),
+        #                    motor.COULEUR_PRIX_OUTLIER, fournisseur["nom"],
+        #                    f"Prix de référence ({k_final} / {base_final}) très éloigné de "
+        #                    f"{portee} ({n_observations} lignes comparables{origine}) : médiane "
+        #                    f"{round(mediane, 4)} / {base_final}, soit un facteur {comparaison}. "
+        #                    "Peut être une erreur de saisie (zéro en trop/en moins, confusion "
+        #                    "d'unité...) ou un vrai écart de prix — à vérifier.")
+        #             return 1
+        #
+        #         stats_produit = indice_prix["produit"].get(
+        #             (base_final, motor.normalise_pour_doublon(designation)))
+        #         if stats_produit:
+        #             total += signale_prix_outlier(
+        #                 stats_produit, 3, f"celui des autres lignes de '{designation}'", "")
+        #
+        #         if lot_valor:
+        #             stats_categorie = indice_prix["categorie"].get(
+        #                 (base_final, motor.normalise_pour_doublon(lot_valor)))
+        #             if stats_categorie:
+        #                 total += signale_prix_outlier(
+        #                     stats_categorie, 5, f"celui de la catégorie '{lot_valor}'",
+        #                     f", catégorie '{lot_valor}'")
     else:
         # Prix manquant(s) : aucune des règles ci-dessus n'a pu s'exécuter, mais la casse de
         # D/L doit quand même être forcée en MAJUSCULES (jamais marqué).
