@@ -766,12 +766,8 @@ def traite_ligne(unite_ref, poids_ref, designation, conditionnement, unite_cmd, 
             r.nouveau_d = "PC"
             if poids_kg:
                 r.nouveau_e = formata_poids_kg(poids_kg)
-            r.couleur_d = COULEUR_UNITE_TRANSFORMEE
-            r.commentaire_d = (
-                f"Unité uniformisée de '{unite_ref}' vers 'PC' : le prix de commande "
-                f"({prix_cmd}) est déjà égal au prix de référence ({prix_ref}), signe que la "
-                "comparaison se fait volontairement à la pièce (ex : une baguette). Prix "
-                "inchangés.")
+            # Pas de couleur/commentaire ici : 'unité'/'piece' -> 'PC' n'est qu'une nomenclature
+            # (pas un changement d'unité réel), rien à signaler.
             return r
 
         if not designation_approximative:
