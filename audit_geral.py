@@ -2308,13 +2308,18 @@ def marque_lignes_dupliquees(ws, doublons, col_designation):
 
 
 def signale_designation_dupliquee(ws, ws_valeurs, ligne_debut, col_designation, fournisseurs,
-                                   lignes_a_exclure):
+                                   lignes_a_exclure, col_lot=None):
     """Signale les lignes qui partagent exactement la même Désignation de l'article qu'une
-    autre ligne ET au moins un même fournisseur (même produit décrit deux fois chez le MÊME
-    fournisseur — pas besoin que le reste de la ligne diffère aussi, juste que ce ne soit pas
-    déjà un doublon complet). Même désignation mais fournisseurs totalement différents n'est
-    PAS signalé ici : avoir le même produit chez différents fournisseurs est normal, pas une
-    entrée en double (une règle dédiée à ce cas est prévue plus tard, pas encore ici).
+    autre ligne, sur deux plans indépendants (une ligne peut recevoir les deux signalements) :
+      1. Au moins un même fournisseur (même produit décrit deux fois chez le MÊME fournisseur —
+         pas besoin que le reste de la ligne diffère aussi, juste que ce ne soit pas déjà un
+         doublon complet). Même désignation mais fournisseurs totalement différents n'est PAS
+         signalé pour ce premier cas : avoir le même produit chez différents fournisseurs est
+         normal, pas une entrée en double.
+      2. Un Lot DIFFÉRENT (quand renseigné des deux côtés) : deux lots distincts ne devraient
+         pas décrire le même produit avec un texte rigoureusement identique — il manque
+         forcément une information distinctive (variété, poids, origine, label...) dans au
+         moins l'une des deux désignations, sinon rien ne permet de les différencier.
     'lignes_a_exclure' : lignes qui font partie d'un doublon COMPLET (toute la ligne identique,
     pas seulement la désignation) — déjà repeintes en rouge par ailleurs, elles ne comptent
     pas ici."""
@@ -2334,21 +2339,49 @@ def signale_designation_dupliquee(ws, ws_valeurs, ligne_debut, col_designation, 
                 noms.add(motor.normalise_pour_doublon(valeur))
         return noms
 
+    def lot_de(ligne):
+        if not col_lot:
+            return None
+        valeur = ws_valeurs.cell(row=ligne, column=col_lot).value
+        return str(valeur).strip() if valeur else None
+
     total = 0
     for lignes in groupes.values():
         if len(lignes) < 2:
             continue
         noms_par_ligne = {l: noms_fournisseurs(l) for l in lignes}
+        lots_par_ligne = {l: lot_de(l) for l in lignes}
         for ligne in lignes:
-            autres = [l for l in lignes if l != ligne and (noms_par_ligne[l] & noms_par_ligne[ligne])]
-            if not autres:
-                continue
-            marque(ws.cell(row=ligne, column=col_designation), motor.COULEUR_COPIE_POSSIBLE,
-                   None,
-                   f"Même Désignation de l'article que la ligne "
-                   f"{' et '.join(str(l) for l in autres)} (même fournisseur) — à comparer, peut "
-                   "être une vraie variante ou une entrée en double.")
-            total += 1
+            marque_ici = False
+
+            autres_fournisseur = [l for l in lignes if l != ligne
+                                   and (noms_par_ligne[l] & noms_par_ligne[ligne])]
+            if autres_fournisseur:
+                marque(ws.cell(row=ligne, column=col_designation), motor.COULEUR_COPIE_POSSIBLE,
+                       None,
+                       f"Même Désignation de l'article que la ligne "
+                       f"{' et '.join(str(l) for l in autres_fournisseur)} (même fournisseur) — "
+                       "à comparer, peut être une vraie variante ou une entrée en double.")
+                marque_ici = True
+
+            if lots_par_ligne[ligne]:
+                autres_lot = [(l, lots_par_ligne[l]) for l in lignes
+                              if l != ligne and lots_par_ligne[l]
+                              and lots_par_ligne[l] != lots_par_ligne[ligne]]
+                if autres_lot:
+                    marque(ws.cell(row=ligne, column=col_designation), motor.COULEUR_RATIO_SUSPECT,
+                           None,
+                           "Même Désignation de l'article que la ligne "
+                           f"{' et '.join(str(l) for l, _ in autres_lot)}, mais un Lot différent "
+                           f"({' , '.join(sorted({lo for _, lo in autres_lot}))} au lieu de "
+                           f"'{lots_par_ligne[ligne]}') — deux lots distincts ne peuvent pas "
+                           "partager une désignation rigoureusement identique : il manque une "
+                           "information distinctive (variété, poids, origine, label...) dans au "
+                           "moins l'une des deux lignes.")
+                    marque_ici = True
+
+            if marque_ici:
+                total += 1
     return total
 
 
@@ -2434,6 +2467,21 @@ def applique_formatage_uniforme(ws, ligne_debut):
             cel.font = fonte
             wrap_text = cel.alignment.wrap_text if cel.alignment else None
             cel.alignment = Alignment(horizontal="left", vertical="center", wrap_text=wrap_text)
+
+
+def desocculte_lignes(ws):
+    """Réaffiche toutes les lignes masquées — résidu fréquent d'un filtre automatique appliqué
+    par la personne qui a rempli le fichier (pour ne regarder qu'un sous-ensemble de produits),
+    puis laissé actif à l'enregistrement. Une ligne masquée contient souvent un produit bien
+    réel (pas une ligne vide), invisible à la relecture si elle n'est pas réaffichée. Purement
+    cosmétique : ne touche à aucune donnée, et ne modifie pas les boutons de filtre eux-mêmes
+    (une personne peut toujours filtrer à nouveau si besoin)."""
+    total = 0
+    for dim in ws.row_dimensions.values():
+        if dim.hidden:
+            dim.hidden = False
+            total += 1
+    return total
 
 
 def normalise_lots(ws, ws_valeurs, ligne_debut, col_lot):
@@ -2615,7 +2663,8 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
 
     stats = {"lignes_avec_incoherence": 0, "marques": 0, "unite_ref_vide": 0,
               "lignes_dupliquees": 0, "copies_possibles": 0, "lots_normalises": 0,
-              "marche_lot_rempli": 0, "marche_lot_signale": 0, "lignes_vides_a_supprimer": 0}
+              "marche_lot_rempli": 0, "marche_lot_signale": 0, "lignes_vides_a_supprimer": 0,
+              "lignes_demasquees": desocculte_lignes(ws)}
 
     # Calculé tôt (pas seulement en fin de fonction) pour que signale_designation_dupliquee()
     # puisse exclure les lignes déjà couvertes par le doublon de ligne COMPLÈTE (repeint en
@@ -2637,7 +2686,7 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
             ws, ws_valeurs, ligne_debut, fournisseur)
 
     stats["copies_possibles"] += signale_designation_dupliquee(
-        ws, ws_valeurs, ligne_debut, col_designation, fournisseurs, set(doublons))
+        ws, ws_valeurs, ligne_debut, col_designation, fournisseurs, set(doublons), col_lot)
 
     for ligne in range(ligne_debut, ws_valeurs.max_row + 1):
         designation = ws_valeurs.cell(row=ligne, column=col_designation).value
@@ -2823,6 +2872,7 @@ def main():
             print(f"  Feuille '{nom_feuille}' : colonnes repérées ({', '.join(resultat['fournisseurs'])})")
 
             total_marques = stats["marques"] + stats["lignes_dupliquees"] + stats["copies_possibles"]
+            print(f"    Lignes masquées réaffichées (résidu de filtre) : {stats['lignes_demasquees']}")
             print(f"    Marché/Lot recopiés (lignes voisines identiques) : {stats['marche_lot_rempli']}")
             print(f"    Marché/Lot signalés (à préciser manuellement) : {stats['marche_lot_signale']}")
             print(f"    Lignes vides (ni désignation ni prix) peintes en rouge : {stats['lignes_vides_a_supprimer']}")
