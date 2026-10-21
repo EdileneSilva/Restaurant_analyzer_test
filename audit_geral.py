@@ -69,7 +69,7 @@ MOTS_CONTENANT = ["sac", "seau", "brique", "barquette", "barq", "bidon", "outre"
                   "bouteille",
                   "bouteile",  # faute de frappe fréquente ('BOUTEILES', 1 seul L)
                   "caisse", "plaque", "plateau", "clayette", "pack", "gourde", "botte",
-                  "bac", "coffret", "plaquette"]
+                  "bac", "coffret", "plaquette", "paquet", "etui", "étui", "bombe"]
 _MOTS_REGEX = "pi[eè]ce|" + "|".join(MOTS_CONTENANT)
 
 # "GR" (abréviation très fréquente de gramme) est absent du vocabulaire d'origine, qui ne
@@ -81,6 +81,10 @@ _UNITES_REGEX = "kg|kilo|gr|g|gramme|l|litre|ml|cl|mg"
 motor.FACTEUR_VERS_KG_OU_L["gr"] = 0.001
 motor.base_depuis_unite = lambda unite: (
     "kg" if unite.lower() in ("kg", "kilo", "g", "gr", "gramme", "mg") else "l")
+
+# Tolérance utilisée partout pour valider un ratio Prix commande ÷ Prix référence contre une
+# quantité attendue (5 % jugé trop permissif — abaissé à 2 %).
+motor.TOLERANCE_RATIO = 0.02
 
 # Palette de couleurs simplifiée (demandée pour remplacer les 8 couleurs d'origine, dont
 # certaines se recouvraient sémantiquement) :
@@ -104,8 +108,11 @@ motor.PACKAGE_TYPES = tuple(MOTS_CONTENANT)
 # fermée à maintenir : on tolère n'importe quelle suite de mots ALPHABÉTIQUES à cet endroit
 # (jamais "de" lui-même, pour ne pas interférer avec l'alternative "(?:de\s+)?" déjà
 # existante). Le récipient retenu reste le premier mot (groupe 1, ancré en ^) : les mots
-# suivants ne sont que des qualificatifs de matière, jamais un second récipient.
-_MOT_QUALIFICATIF = r"(?:(?!de\b)[A-Za-zÀ-ÿ]+\s+)*"
+# suivants ne sont que des qualificatifs de matière, jamais un second récipient. Un marqueur
+# de comptage collé 'x<N>' ('COLIS X960 5 KG' : un colis de 960 pièces, 5 kg au total) est
+# toléré ici de la même façon — il décrit le nombre de pièces, une information à part du poids
+# total qui suit, pas un second récipient non plus.
+_MOT_QUALIFICATIF = r"(?:(?!de\b)(?:[A-Za-zÀ-ÿ]+|x\d+)\s+)*"
 motor.RE_TYPE = re.compile(
     rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
 motor.RE_CONTENANT_MULTIPLIE = re.compile(
@@ -129,7 +136,8 @@ motor.CONTENANT_ABREGE = {
     "carton": "CARTON", "poche": "POCHE", "bouteille": "BOUTEILLE", "bouteile": "BOUTEILLE",
     "cageot": "CAGEOT", "boite": "BOITE", "boîte": "BOITE", "filet": "FILET",
     "caisse": "CAISSE", "plaque": "PLAQUE", "plateau": "PLATEAU", "clayette": "CLAYETTE",
-    "bac": "BAC", "coffret": "COFFRET", "plaquette": "PLAQUETTE",
+    "bac": "BAC", "coffret": "COFFRET", "plaquette": "PLAQUETTE", "paquet": "PAQUET",
+    "etui": "ETUI", "étui": "ETUI", "bombe": "BOMBE",
 }
 
 # Abréviations déjà utilisées telles quelles dans certains fichiers sources (ex: le fichier
@@ -192,6 +200,22 @@ RE_CONTENANT_IMBRIQUE = re.compile(
     rf"([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
 RE_CONTENANT_PUIS_MULT = re.compile(
     rf"^\s*({_MOTS_REGEX})s?\s+(?:de\s+)?(\d+)\s*x\s*([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
+
+# Même chose que RE_CONTENANT_PUIS_MULT, mais avec 'x' (pas 'de') AVANT le premier nombre, et
+# un mot 'ST'/'SACHET(S)' collé juste après ce nombre ('CARTON X 5 ST X 1 KG' : un carton de 5
+# sachets de 1 kg chacun, 5 kg au total) — 'st' n'est PAS ajouté au vocabulaire général des
+# récipients (trop court, risque de faux positifs ailleurs) : il n'est reconnu qu'à cette
+# position précise, entre le nombre de sous-unités et le second 'x'.
+RE_CONTENANT_PUIS_MULT_SACHET = re.compile(
+    rf"^\s*({_MOTS_REGEX})s?\s+(?:de|x)\s+(\d+)\s*(?:st|sachets?)\.?\s*x\s*([\d,.]+)\s*({_UNITES_REGEX})\s*$",
+    re.I)
+
+# Même chose que RE_CONTENANT_PUIS_MULT, mais dans l'ordre inverse — le poids D'UNE pièce
+# d'abord, puis le nombre de pièces collé en 'x<N>' ('COLIS 30 G X144' : 144 pièces de 30 g
+# chacune, pas 30 g au total) — observé dans les mêmes fichiers que le motif 'CONTENANT x<N>
+# POIDS' ci-dessus (voir _MOT_QUALIFICATIF), juste avec le poids et le compte intervertis.
+RE_CONTENANT_POIDS_PUIS_X = re.compile(
+    rf"^\s*({_MOTS_REGEX})s?\s+(?:de\s+)?([\d,.]+)\s*({_UNITES_REGEX})\s*x\s*(\d+)\s*$", re.I)
 
 # Triple imbrication ("CARTON DE 8 PACKS DE 4 GOURDES DE 90 GR" : un carton de 8 packs,
 # chaque pack contenant 4 gourdes de 90g) — la "pièce" vendue est le niveau INTERMÉDIAIRE (le
@@ -266,6 +290,22 @@ def extraire_quantite_designation_etendue(designation):
 
 motor.extraire_quantite_designation = extraire_quantite_designation_etendue
 
+
+def extraire_dernier_poids_designation(designation):
+    """Comme extraire_quantite_designation_etendue, mais renvoie le DERNIER nombre+unité
+    trouvé, pas le premier — utile quand la désignation détaille d'abord un poids PAR PIÈCE
+    avant de donner le poids TOTAL du contenant entier (ex: 'GALETTES (100X15GR) 1.5 KG' :
+    15GR est le poids d'une galette, 1.5KG est le poids total des 100 — c'est ce dernier qu'il
+    faut retenir quand le ratio confirme que le prix est pour le contenant entier, pas pour une
+    pièce)."""
+    if not designation:
+        return None, None
+    trouvailles = RE_QUANTITE_DESIGNATION.findall(str(designation))
+    if not trouvailles:
+        return None, None
+    qty, unite = trouvailles[-1]
+    return motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()], motor.base_depuis_unite(unite)
+
 _mot_type_conditionnement_original = motor.mot_type_conditionnement
 
 
@@ -317,8 +357,15 @@ motor.recipient_conditionnement = recipient_conditionnement_etendu
 # d'origine dans les commentaires, pour ne pas modifier le fichier source partagé.
 ALIAS_UNITE_REF = {"pc": "unité"}
 
+# Mot de comptage final ('pièces', 'tranches', 'portions', 'biscuits'...) : jamais une liste
+# fermée à maintenir (le mot varie selon le produit : tranches de pain, biscuits, galettes...),
+# donc on accepte N'IMPORTE QUEL mot à cet endroit — SAUF une unité de poids/volume reconnue
+# ('kg', 'g'...), qui doit rester traitée par les motifs dédiés au poids (RE_TYPE,
+# RE_CONTENANT_MULTIPLIE...), jamais confondue avec un simple compte de pièces.
+_MOT_COMPTAGE_FINAL = rf"(?!(?:{_UNITES_REGEX})\b)[A-Za-zÀ-ÿ]+"
+
 RE_CONTENANT_NX_M_PIECES = re.compile(
-    rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?(\d+)\s*x\s*(\d+)\s*(?:pi[eè]ces?|u)\s*$", re.I)
+    rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?(\d+)\s*x\s*(\d+)\s*{_MOT_COMPTAGE_FINAL}\s*$", re.I)
 
 # "COLIS DE 12 BARQUETTES", "COLIS DE 12 BOTTES" : récipient extérieur contenant N récipients
 # nommés (pas littéralement "pièces"), sans aucun poids donné. Le récipient intérieur EST la
@@ -366,16 +413,34 @@ def piece_carton_candidats(unite_ref, conditionnement):
                 motor.normalise_texte(mot_ext), int(m_inner))
     m = RE_CONTENANT_IMBRIQUE.match(conditionnement)
     if m:
-        _mot_ext, n, mot_piece, qty, unite = m.groups()
+        mot_ext, n, mot_piece, qty, unite = m.groups()
         poids_piece = round(motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()], 3)
-        return [int(n)], motor.normalise_texte(mot_piece), poids_piece, motor.base_depuis_unite(unite), None, None
+        # '1' est ajouté comme candidat valable (contenant entier vendu en un seul morceau,
+        # ex: ratio = 1 malgré un conditionnement qui détaille N pièces de tel poids) — même
+        # logique que RE_CONTENANT_PIECES_SEULEMENT plus bas. Le récipient EXTÉRIEUR (mot_ext,
+        # ex: 'carton') n'est renvoyé en 5e position (comme pour RE_CONTENANT_TRIPLE_IMBRIQUE)
+        # QUE si le récipient intérieur est RÉEL (ex: 'bouteille' dans 'CARTON 6 BOUTEILLES DE
+        # 75 CL') : c'est alors lui l'unité de référence et le récipient extérieur l'unité de
+        # commande (même logique CAS-3 que le triple niveau). Quand l'intérieur n'est que
+        # 'piece'/'pièce' (compte générique, ex: 'CARTON 12 PIECES DE 500 GR'), mot_ext_imbrique
+        # reste None comme avant : sinon la détection "vendu au poids total, pas à la pièce"
+        # plus haut (qui exige justement 'not mot_ext_imbrique') ne s'appliquerait plus.
+        mot_piece_norm = motor.normalise_texte(mot_piece)
+        mot_ext_imbrique = motor.normalise_texte(mot_ext) if mot_piece_norm not in ("piece", "pièce") else None
+        return ([1, int(n)], mot_piece_norm, poids_piece, motor.base_depuis_unite(unite),
+                mot_ext_imbrique, None)
     m = RE_CONTENANT_PUIS_MULT.match(conditionnement)
     if m:
         mot_ext, n, qty, unite = m.groups()
         poids_piece = round(motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()], 3)
         # Le récipient nommé ('CARTON DE 8 X 250 GR') garde son nom en unité de commande —
         # "LOT DE N" est réservé aux formats SANS aucun nom de récipient ('100 x 10g').
-        return [int(n)], motor.normalise_texte(mot_ext), poids_piece, motor.base_depuis_unite(unite), None, None
+        return [1, int(n)], motor.normalise_texte(mot_ext), poids_piece, motor.base_depuis_unite(unite), None, None
+    m = RE_CONTENANT_POIDS_PUIS_X.match(conditionnement)
+    if m:
+        mot_ext, qty, unite, n = m.groups()
+        poids_piece = round(motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()], 3)
+        return [1, int(n)], motor.normalise_texte(mot_ext), poids_piece, motor.base_depuis_unite(unite), None, None
     m = motor.RE_CONTENANT_MULTIPLIE.match(conditionnement)
     if m:
         n, mot_piece, qty, unite = m.groups()
@@ -385,10 +450,25 @@ def piece_carton_candidats(unite_ref, conditionnement):
     if m:
         mot_ext, n1, n2 = m.group(1), int(m.group(2)), int(m.group(3))
         return [n1, n2, n1 * n2], motor.normalise_texte(mot_ext), None, None, None, None
+    # Récipient extérieur contenant N récipients intérieurs NOMMÉS ('CARTON DE 12 PLAQUES',
+    # 'COLIS DE 12 BARQUETTES') : vérifié AVANT RE_CONTENANT_PIECES_SEULEMENT ci-dessous,
+    # devenu généraliste (n'importe quel mot de comptage final) — sinon ce motif plus
+    # spécifique (récipient intérieur réellement nommé) ne serait jamais atteint.
+    m = RE_CONTENANT_PUIS_CONTENANT_SEUL.match(conditionnement)
+    if (m and motor.normalise_texte(m.group(1)) != motor.normalise_texte(m.group(3))
+            and motor.normalise_texte(m.group(3)) not in ("piece", "pièce")):
+        mot_ext, n, mot_int = m.group(1), int(m.group(2)), m.group(3)
+        # Même logique que RE_CONTENANT_PIECES_SEULEMENT (1 = contenant entier vendu en un
+        # seul morceau, n = pièces séparées), mais avec un récipient intérieur nommé (pas
+        # juste "pièces") : il devient l'unité de référence si confirmé, le récipient
+        # extérieur reste l'unité de commande (imbrication à un niveau, pas de poids connu).
+        return ([1, n], motor.normalise_texte(mot_int), None, None,
+                motor.normalise_texte(mot_ext), n)
     # Récipient nommé contenant SEULEMENT un nombre de pièces, sans poids ('CAGEOT DE 30
-    # PIECES') : le poids réel est inconnu (souvent variable), mais le nombre de pièces suffit
-    # à vérifier le ratio — pas besoin de deviner un poids via la désignation pour expliquer le
-    # prix (ce qui donnerait un résultat en €/kg non pertinent ici).
+    # PIECES', 'SAC DE 100 BISCUITS') : le poids réel est inconnu (souvent variable), mais le
+    # nombre de pièces suffit à vérifier le ratio — pas besoin de deviner un poids via la
+    # désignation pour expliquer le prix (ce qui donnerait un résultat en €/kg non pertinent
+    # ici).
     m = RE_CONTENANT_PIECES_SEULEMENT.match(conditionnement)
     if m:
         mot_ext, n = m.group(1), int(m.group(2))
@@ -397,15 +477,6 @@ def piece_carton_candidats(unite_ref, conditionnement):
         # contenant divisé en N parts (ratio = 1, ex: 'PLAQUE DE 30 PIECES' = un gâteau coupé
         # en 30 parts, vendu entier) — le 1 est ajouté comme candidat valable lui aussi.
         return [1, n], motor.normalise_texte(mot_ext), None, None, None, None
-    m = RE_CONTENANT_PUIS_CONTENANT_SEUL.match(conditionnement)
-    if m and motor.normalise_texte(m.group(1)) != motor.normalise_texte(m.group(3)):
-        mot_ext, n, mot_int = m.group(1), int(m.group(2)), m.group(3)
-        # Même logique que RE_CONTENANT_PIECES_SEULEMENT (1 = contenant entier vendu en un
-        # seul morceau, n = pièces séparées), mais avec un récipient intérieur nommé (pas
-        # juste "pièces") : il devient l'unité de référence si confirmé, le récipient
-        # extérieur reste l'unité de commande (imbrication à un niveau, pas de poids connu).
-        return ([1, n], motor.normalise_texte(mot_int), None, None,
-                motor.normalise_texte(mot_ext), n)
     m = RE_LOT_PIECES_SEULEMENT.match(conditionnement)
     if m:
         # "LOT DE 4 PIECES" : aucun récipient nommé, juste un comptage — le marqueur 'lot'
@@ -458,6 +529,11 @@ def determine_base_et_quantite(conditionnement):
         mot_ext, n, qty, unite = m.groups()
         quantite = motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()] * int(n)
         return motor.base_depuis_unite(unite), quantite, motor.normalise_texte(mot_ext)
+    m = RE_CONTENANT_PUIS_MULT_SACHET.match(conditionnement)
+    if m:
+        mot_ext, n, qty, unite = m.groups()
+        quantite = motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()] * int(n)
+        return motor.base_depuis_unite(unite), quantite, motor.normalise_texte(mot_ext)
     m = motor.RE_CONTENANT_MULTIPLIE.match(conditionnement)
     if m and motor.normalise_texte(m.group(2)) != "piece":
         n, mot_ext, qty, unite = m.groups()
@@ -484,7 +560,8 @@ def determine_base_et_quantite(conditionnement):
 _MOTS_CONTENANT_CANONIQUES = [
     "sac", "seau", "brique", "barquette", "bidon", "outre", "colis", "pot", "sachet",
     "carton", "poche", "cageot", "boite", "boîte", "filet", "bouteille", "caisse", "plaque",
-    "plateau", "clayette", "bac", "coffret", "plaquette", "piece",
+    "plateau", "clayette", "bac", "coffret", "plaquette", "paquet", "etui", "étui", "bombe",
+    "piece",
 ]
 _MOTS_CONTENANT_CONNUS = set(MOTS_CONTENANT) | {"piece", "pièce"}
 
@@ -651,23 +728,34 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                     f"{base_unite}.")
                 return r2
 
-        if mot_ext_imbrique and candidat_ok is not None and candidat_ok == total_pieces:
+        if (mot_ext_imbrique and mot_piece not in ("piece", "pièce")
+                and candidat_ok is not None and candidat_ok == total_pieces):
             # Contenant à double imbrication confirmé par le ratio des prix (ex: "CARTON DE 8
-            # PACKS DE 4 GOURDES DE 90 GR", 8 packs/carton confirmé) : la vraie unité de
-            # référence est le contenant intermédiaire (pack), pas 'PC' générique — règle
-            # métier documentée dans useful_stuff/Exemples unités et prix 6.xlsx ("CAS 3").
-            r.nouveau_d = mot_piece.upper()
+            # PACKS DE 4 GOURDES DE 90 GR", 8 packs/carton confirmé ; ou "CARTON 6 BOUTEILLES DE
+            # 75 CL", 6 bouteilles confirmé) : la vraie unité de référence est le contenant
+            # intermédiaire/intérieur (pack, bouteille...), pas 'PC' générique — règle métier
+            # documentée dans useful_stuff/Exemples unités et prix 6.xlsx ("CAS 3"). Exclu
+            # quand le récipient intérieur n'est que 'piece'/'pièce' (compte générique, pas un
+            # vrai récipient, ex: 'CARTON 6 PIECES DE 300 GR') : D doit rester 'PC' générique,
+            # seul le récipient extérieur (mot_ext_imbrique) reste pertinent pour L, géré dans
+            # le 'else' ci-dessous.
+            # CONTENANT_ABREGE normalise les variantes connues (ex: 'bouteile', faute de frappe
+            # fréquente à un seul L) vers l'orthographe correcte — sans ça, une faute de frappe
+            # non corrigée en amont sur le Conditionnement se retrouverait écrite telle quelle.
+            mot_piece_novo = motor.CONTENANT_ABREGE.get(mot_piece, mot_piece.upper())
+            mot_ext_novo = motor.CONTENANT_ABREGE.get(mot_ext_imbrique, mot_ext_imbrique.upper())
+            r.nouveau_d = mot_piece_novo
             r.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
             r.commentaire_d = (
-                f"Unité de référence précisée en '{mot_piece.upper()}' (contenant intermédiaire) "
+                f"Unité de référence précisée en '{mot_piece_novo}' (contenant intermédiaire) "
                 f"plutôt que 'PC' générique : le conditionnement ('{conditionnement}') décrit un "
                 f"contenant à double niveau, et le ratio Prix commande ÷ Prix référence "
                 f"({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) confirme {total_pieces} "
                 f"{mot_piece}s par {mot_ext_imbrique}.")
-            r.nouveau_l = mot_ext_imbrique.upper()
+            r.nouveau_l = mot_ext_novo
             r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
             r.commentaire_l = (
-                f"Unité de commande précisée en '{mot_ext_imbrique.upper()}' pour correspondre "
+                f"Unité de commande précisée en '{mot_ext_novo}' pour correspondre "
                 f"au contenant extérieur décrit dans le conditionnement ('{conditionnement}').")
             r.contenant_imbrique_confirme = True
             if nb_pieces_internes:
@@ -710,11 +798,15 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                 f"Unité de commande précisée en 'LOT DE {total_pieces}' : le ratio Prix "
                 f"commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) "
                 f"correspond au conditionnement ('{conditionnement}'), sans récipient nommé.")
-        elif mot_piece and mot_piece != "lot" and not mot_ext_imbrique:
+        elif (mot_piece and mot_piece not in ("lot", "piece", "pièce") and not mot_ext_imbrique):
             # Récipient nommé dans le conditionnement ('COLIS DE 15 PIECES' -> 'colis') : on le
             # reprend dans l'unité de commande, QUE LE RATIO confirme ou non le nombre de
             # pièces — le nom du récipient vient directement du texte (fiable), indépendamment
-            # de la cohérence du prix (qui reste signalée séparément si besoin).
+            # de la cohérence du prix (qui reste signalée séparément si besoin). 'piece'/'pièce'
+            # est exclu : ce n'est pas un récipient réel (juste un compte générique, ex: 'CARTON
+            # 6 PIECES DE 300 GR' où RE_CONTENANT_IMBRIQUE renvoie 'piece' comme mot_piece faute
+            # de récipient intérieur nommé) — l'imposer en L écraserait à tort un vrai récipient
+            # déjà correct ('CARTON').
             l_novo = motor.CONTENANT_ABREGE.get(mot_piece, mot_piece.upper())
             if motor.normalise_texte(l_novo) != motor.normalise_texte(unite_cmd):
                 r.nouveau_l = l_novo
@@ -775,12 +867,23 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                 f"{round(ratio, 3)}) ne correspond à aucun d'eux. À vérifier manuellement.")
         elif candidat_ok == 1 and candidat_ok != total_pieces:
             # Le ratio confirme que c'est le CONTENANT ENTIER (pas chacune de ses parts) qui
-            # est vendu (ex: 'PLAQUE DE 30 PIECES' = un gâteau entier coupé en 30 parts) — on
-            # cherche alors le poids de ce contenant dans la Désignation fournisseur ou la
-            # Désignation de l'article pour compléter E.
-            poids_trouve, base_trouvee = motor.extraire_quantite_designation(desig_fourn or "")
-            if not (poids_trouve and base_trouvee == "kg"):
-                poids_trouve, base_trouvee = motor.extraire_quantite_designation(designation or "")
+            # est vendu (ex: 'PLAQUE DE 30 PIECES' = un gâteau entier coupé en 30 parts, 'COLIS
+            # 30 G X100' = un colis de 100 pièces de 30 g). Si le poids d'UNE pièce est déjà
+            # connu depuis le conditionnement lui-même (poids_piece, ex: les '30 G' de 'COLIS 30
+            # G X100'), le poids total du contenant entier se déduit directement (poids_piece ×
+            # total_pieces) — bien plus fiable qu'une recherche en texte libre, qui confondrait
+            # ce poids PAR pièce avec le poids total recherché ici. On ne cherche dans la
+            # désignation qu'à défaut (ex: 'PLAQUE DE 30 PIECES', qui ne donne aucun poids).
+            if poids_piece:
+                poids_trouve, base_trouvee = round(poids_piece * total_pieces, 3), base_unite
+            else:
+                # On prend le DERNIER nombre trouvé, pas le premier : la désignation détaille
+                # parfois d'abord un poids PAR PIÈCE avant de donner le poids total (ex:
+                # '(100X15GR) 1.5 KG' — 15GR est le poids d'une galette, 1.5KG le poids des 100,
+                # celui qu'il faut ici puisque le prix est pour le tout).
+                poids_trouve, base_trouvee = extraire_dernier_poids_designation(desig_fourn or "")
+                if not (poids_trouve and base_trouvee == "kg"):
+                    poids_trouve, base_trouvee = extraire_dernier_poids_designation(designation or "")
             if poids_trouve and base_trouvee == "kg" and not poids_ref:
                 r.nouveau_e = round(poids_trouve, 3)
                 r.explication_e = (
@@ -790,14 +893,32 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                     f"{round(ratio, 3)}) confirme que le prix est pour le contenant ENTIER, pas "
                     "pour une part individuelle — poids trouvé dans la désignation.")
         elif candidat_ok != total_pieces:
-            r.couleur_d = motor.COULEUR_RATIO_SUSPECT
-            r.commentaire_d = (
-                f"L'unité de référence est déclarée à la pièce ('{unite_ref}'), mais le ratio "
-                f"observé ({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) correspond à "
-                f"{candidat_ok}, un SOUS-groupe du conditionnement ('{conditionnement}'), pas "
-                f"au nombre total de pièces ({total_pieces}). Le prix de référence semble être "
-                f"au prix du sous-lot de {candidat_ok}, pas à la pièce individuelle — à "
-                "vérifier.")
+            # Le ratio confirme un SOUS-groupe intermédiaire (ex: 'CARTON DE 12 X 36
+            # TRANCHES' : ratio = 12, le carton contient 12 paquets de 36 tranches chacun — le
+            # prix est pour UN paquet, pas pour une tranche ni pour le carton entier) : on
+            # cherche le poids de CE sous-groupe dans la désignation (premier nombre trouvé,
+            # comme pour le cas 'pièce individuelle' ci-dessus — pas de poids total en jeu ici)
+            # avant de se contenter de signaler l'incohérence.
+            poids_trouve, base_trouvee = motor.extraire_quantite_designation(desig_fourn or "")
+            if not (poids_trouve and base_trouvee == "kg"):
+                poids_trouve, base_trouvee = motor.extraire_quantite_designation(designation or "")
+            if poids_trouve and base_trouvee == "kg" and not poids_ref:
+                r.nouveau_e = round(poids_trouve, 3)
+                r.explication_e = (
+                    f"Poids à l'unité de référence renseigné à {round(poids_trouve, 3)} kg : le "
+                    f"ratio Prix commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = "
+                    f"{round(ratio, 3)}) correspond à {candidat_ok}, un sous-groupe du "
+                    f"conditionnement ('{conditionnement}') — poids trouvé dans la désignation "
+                    "pour ce sous-groupe.")
+            else:
+                r.couleur_d = motor.COULEUR_RATIO_SUSPECT
+                r.commentaire_d = (
+                    f"L'unité de référence est déclarée à la pièce ('{unite_ref}'), mais le "
+                    f"ratio observé ({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) correspond à "
+                    f"{candidat_ok}, un SOUS-groupe du conditionnement ('{conditionnement}'), "
+                    f"pas au nombre total de pièces ({total_pieces}). Le prix de référence "
+                    f"semble être au prix du sous-lot de {candidat_ok}, pas à la pièce "
+                    "individuelle — à vérifier.")
         return r  # cohérent (ou signalé ci-dessus) — le poids par pièce n'est pas utilisé
 
     # Unité de référence en kg/L (ou nommant elle-même un récipient, ex: 'seau', 'barquette')
@@ -944,6 +1065,33 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                 if (ratio_entier != 0 and ratio_entier != 1
                         and abs(ratio_prix - ratio_entier) < 0.02
                         and abs(ratio_prix - quantite) > tolerance_qte):
+                    # Avant de se contenter de signaler : si le conditionnement est justement
+                    # écrit 'CONTENANT DE N X QTÉ UNITÉ' (ex: 'CARTON DE 9 X 500 GR') et que ce
+                    # N littéral correspond exactement au ratio entier observé, le prix n'est
+                    # pas incohérent — il est simplement donné par SOUS-paquet (ici 500 g), pas
+                    # au kilo : l'unité de référence devient 'PC', le poids d'un sous-paquet
+                    # (quantité totale ÷ N) renseigne E, et les prix restent intouchés (ils
+                    # étaient déjà corrects pour cette lecture-là).
+                    m_mult = (RE_CONTENANT_PUIS_MULT.match(conditionnement)
+                              or motor.RE_CONTENANT_MULTIPLIE.match(conditionnement))
+                    n_texte = None
+                    if m_mult:
+                        n_texte = int(m_mult.group(2) if m_mult.re is RE_CONTENANT_PUIS_MULT
+                                      else m_mult.group(1))
+                    if n_texte == ratio_entier:
+                        poids_sous_paquet = round(quantite / ratio_entier, 3)
+                        r.nouveau_d = "PC"
+                        r.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
+                        r.commentaire_d = (
+                            f"Unité de référence changée de '{unite_ref}' vers 'PC' : le "
+                            f"conditionnement ('{conditionnement}') décrit {ratio_entier} "
+                            f"sous-paquets de {poids_sous_paquet} {base} chacun, et le ratio "
+                            f"Prix commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = "
+                            f"{round(ratio_prix, 3)}) confirme que le prix de référence est déjà "
+                            "celui d'UN sous-paquet, pas du kilo. Prix inchangés.")
+                        if not poids_ref:
+                            r.nouveau_e = poids_sous_paquet
+                        return r
                     r.couleur_m = motor.COULEUR_RATIO_SUSPECT
                     r.commentaire_m = (
                         f"Le ratio Prix commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = "
@@ -1103,10 +1251,33 @@ def reconsidere_ratio_un_contre_contenant(resultat, unite_ref, unite_cmd, condit
             except (KeyError, ValueError):
                 continue
 
-    for quantite, unite_str in candidats_libres:
-        if motor.base_depuis_unite(unite_str) != ("kg" if base_cible == "kg" else "l"):
-            continue
-        if quantite > 0 and abs(quantite - 1) > motor.TOLERANCE_RATIO:
+    candidats_pertinents = [
+        quantite for quantite, unite_str in candidats_libres
+        if motor.base_depuis_unite(unite_str) == ("kg" if base_cible == "kg" else "l") and quantite > 0]
+
+    # Si au moins un nombre du texte CONFIRME déjà le ratio (ex: 'SACHET DE 1 KG, PIECE DE 120
+    # GR' — le '1 KG' confirme, le '120 GR' n'est qu'un détail par pièce qu'il ne faut pas
+    # traiter comme une quantité totale contredisant le premier) : rien à signaler. On en
+    # profite pour préciser l'unité de commande avec le récipient nommé dans le texte (même
+    # recherche que reconsidere_contenant_nombre_pieces, insensible aux virgules), si elle
+    # n'était encore qu'un simple rappel de la base kg/L.
+    if any(abs(quantite - 1) <= motor.TOLERANCE_RATIO for quantite in candidats_pertinents):
+        if base_cmd == base_cible:
+            mot = mot_contenant_dans_conditionnement(conditionnement)
+            if mot:
+                l_novo = motor.CONTENANT_ABREGE.get(mot, mot.upper())
+                if motor.normalise_texte(l_novo) != motor.normalise_texte(unite_cmd):
+                    resultat.nouveau_l = l_novo
+                    resultat.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+                    resultat.commentaire_l = (
+                        f"Unité de commande précisée en '{l_novo}' d'après le conditionnement "
+                        f"('{conditionnement}').")
+        return
+
+    # Aucun nombre ne confirme le ratio : on signale avec le PREMIER trouvé (comportement
+    # d'origine, inchangé).
+    for quantite in candidats_pertinents:
+        if abs(quantite - 1) > motor.TOLERANCE_RATIO:
             if annule_relabel:
                 resultat.nouveau_l = None
                 resultat.couleur_l = None
@@ -1158,7 +1329,7 @@ def reconsidere_recipient_de_1_unite(resultat, unite_ref, unite_cmd, conditionne
 
 
 RE_CONTENANT_PIECES_SEULEMENT = re.compile(
-    rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?(\d+)\s*(?:pi[eè]ces?|u)\s*$", re.I)
+    rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?(\d+)\s*{_MOT_COMPTAGE_FINAL}\s*$", re.I)
 
 # "LOT DE N PIECES" (ex: yaourts vendus en lot de 2/4/6/8) : même logique que ci-dessus, mais
 # "lot" n'est volontairement PAS un récipient physique (pas dans _MOTS_REGEX) — c'est un
@@ -1394,7 +1565,8 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
 
     mots_types = ["sac", "pièce", "piece", "seau", "brique", "barquette", "barq", "bidon",
                   "outre", "colis", "pot", "sachet", "carton", "poche", "bouteille", "bouteile",
-                  "cageot", "boite", "boîte", "filet", "caisse", "plaque", "plateau", "clayette"]
+                  "cageot", "boite", "boîte", "filet", "caisse", "plaque", "plateau", "clayette",
+                  "bac", "coffret", "plaquette", "paquet", "etui", "étui", "bombe"]
     trouve = [m for m in mots_types if m in texte_combine]
     if not trouve:
         return True, None
@@ -1404,7 +1576,7 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
         return True, None
     if cat == "pc" and any(m in ("pièce", "piece", "pot", "sachet") for m in trouve):
         return True, None
-    if cat == "barquette" and "barquette" in trouve:
+    if cat == "barquette" and any(m in ("barquette", "barq") for m in trouve):
         return True, None
     if cat == "sac" and "sac" in trouve:
         return True, None
@@ -1421,7 +1593,7 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
         trouve_corrige = [m for m in mots_types if m in f"{cond_corrige} {desig}"]
         if cat_singulier in trouve_corrige or (cat == "pc" and any(
                 m in ("pièce", "piece", "pot", "sachet") for m in trouve_corrige)) or (
-                cat == "barquette" and "barquette" in trouve_corrige) or (
+                cat == "barquette" and any(m in ("barquette", "barq") for m in trouve_corrige)) or (
                 cat == "sac" and "sac" in trouve_corrige) or (cat == "bouteille" and any(
                 m in ("bouteille", "brique") for m in trouve_corrige)):
             return True, None
