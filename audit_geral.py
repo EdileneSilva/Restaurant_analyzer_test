@@ -691,12 +691,12 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
         r.commentaire_f = f"Renseigné à {n} : nombre de pièces dans ce '{mot_contenant}'."
         r.contenant_imbrique_confirme = True  # pour valider l'unité de commande CORRIGÉE, pas l'ancienne
         if round(prix_ref, 4) != prix_par_piece:
-            r.couleur_k = motor.COULEUR_UNITE_TRANSFORMEE
+            r.couleur_k = motor.COULEUR_RATIO_SUSPECT
             r.nouveau_k = prix_par_piece
             r.commentaire_k = (
-                f"Prix de référence recalculé par pièce : {prix_cmd} ÷ {n} = {prix_par_piece} "
-                f"(ancien prix de référence : {prix_ref}, qui n'était pas divisé par le nombre "
-                "de pièces).")
+                f"Prix de référence par pièce suggéré : {prix_cmd} ÷ {n} = {prix_par_piece} "
+                f"(prix de référence actuel : {prix_ref}, qui ne semble pas divisé par le "
+                "nombre de pièces) — à vérifier, non modifié automatiquement.")
         return r
 
     resultat_pieces = piece_carton_candidats(unite_ref, conditionnement)
@@ -1143,14 +1143,13 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
 
                 if k_change:
                     r.nouveau_k = nouveau_k
-                    r.couleur_k = motor.COULEUR_UNITE_TRANSFORMEE
+                    r.couleur_k = motor.COULEUR_RATIO_SUSPECT
                     qte_affichee = round(quantite, 6) if quantite < 1 else round(quantite, 3)
                     r.commentaire_k = (
-                        f"Prix de référence recalculé : {prix_cmd} ÷ {qte_affichee} "
-                        f"{base} = {nouveau_k} (ancien prix de référence : {prix_ref}). Le "
+                        f"Prix de référence suggéré : {prix_cmd} ÷ {qte_affichee} "
+                        f"{base} = {nouveau_k} (prix de référence actuel : {prix_ref}). Le "
                         f"conditionnement ('{conditionnement}') indique {qte_affichee} {base} "
-                        f"pour ce récipient ; le prix de commande ({prix_cmd}) reste le prix "
-                        "réel, inchangé.")
+                        f"pour ce récipient — à vérifier, non modifié automatiquement.")
 
                 if l_change:
                     r.nouveau_l = l_novo
@@ -2090,11 +2089,16 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
         k_differe = (resultat.nouveau_k is not None
                      and abs(resultat.nouveau_k - prix_ref) > 0.0005)
 
-        # Écrit toujours la valeur normalisée (D en KG/L/PC, L quand il est fiable, K quand
-        # recalculé) — même une simple normalisation silencieuse (kg -> KG) est appliquée.
-        # Seule la mise en évidence (couleur + commentaire) dépend d'un changement réel. Et si
-        # aucune règle n'a eu de raison de toucher D/L, on force quand même la casse en
-        # MAJUSCULES (jamais marqué, ce n'est qu'une question de casse).
+        # Écrit toujours la valeur normalisée (D en KG/L/PC, L quand il est fiable) — même une
+        # simple normalisation silencieuse (kg -> KG) est appliquée. Seule la mise en évidence
+        # (couleur + commentaire) dépend d'un changement réel. Et si aucune règle n'a eu de
+        # raison de toucher D/L, on force quand même la casse en MAJUSCULES (jamais marqué, ce
+        # n'est qu'une question de casse).
+        #
+        # Le prix de référence (K), lui, n'est JAMAIS écrit automatiquement, même quand le
+        # script est confiant dans son calcul — uniquement surligné (couleur) et commenté
+        # (resultat.commentaire_k, ci-dessous), exactement comme les incohérences : une
+        # personne valide toujours le changement de prix elle-même.
         if resultat.nouveau_d is not None:
             valeur_d = resultat.nouveau_d.upper() if isinstance(resultat.nouveau_d, str) else resultat.nouveau_d
             ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]).value = valeur_d
@@ -2109,8 +2113,6 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
             maj = majuscule_si_inchangee(unite_cmd)
             if maj:
                 ws.cell(row=ligne, column=fournisseur["unite_cmd"]).value = maj
-        if resultat.nouveau_k is not None:
-            ws.cell(row=ligne, column=fournisseur["prix_ref"]).value = resultat.nouveau_k
 
         if resultat.couleur_d in COULEURS_INCOHERENCE and resultat.commentaire_d and (
                 d_differe or resultat.nouveau_d is None):
