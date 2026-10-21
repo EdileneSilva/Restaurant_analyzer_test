@@ -68,7 +68,8 @@ MOTS_CONTENANT = ["sac", "seau", "brique", "barquette", "barq", "bidon", "outre"
                   "pot", "sachet", "carton", "poche", "cageot", "boite", "boîte", "filet",
                   "bouteille",
                   "bouteile",  # faute de frappe fréquente ('BOUTEILES', 1 seul L)
-                  "caisse", "plaque", "plateau", "clayette", "pack", "gourde", "botte"]
+                  "caisse", "plaque", "plateau", "clayette", "pack", "gourde", "botte",
+                  "bac", "coffret", "plaquette"]
 _MOTS_REGEX = "pi[eè]ce|" + "|".join(MOTS_CONTENANT)
 
 # "GR" (abréviation très fréquente de gramme) est absent du vocabulaire d'origine, qui ne
@@ -97,10 +98,18 @@ motor.COULEUR_COUSTERON = motor.COULEUR_PRIX_INEXPLIQUE = "FF92D050"
 motor.COULEUR_COPIE_POSSIBLE = "FFFF6969"
 
 motor.PACKAGE_TYPES = tuple(MOTS_CONTENANT)
+# Un ou plusieurs mots qualificatifs (matière, ou...) insérés entre le récipient et sa
+# quantité ('CAISSE BOIS 10 KG', 'CAGEOT BOIS OU CARTON 5KG', 'COLIS NUE 2 KG'...) — observé
+# dans des fichiers réels, mots variables (bois/carton/nue/poly/verre/ou...), jamais une liste
+# fermée à maintenir : on tolère n'importe quelle suite de mots ALPHABÉTIQUES à cet endroit
+# (jamais "de" lui-même, pour ne pas interférer avec l'alternative "(?:de\s+)?" déjà
+# existante). Le récipient retenu reste le premier mot (groupe 1, ancré en ^) : les mots
+# suivants ne sont que des qualificatifs de matière, jamais un second récipient.
+_MOT_QUALIFICATIF = r"(?:(?!de\b)[A-Za-zÀ-ÿ]+\s+)*"
 motor.RE_TYPE = re.compile(
-    rf"^\s*({_MOTS_REGEX})s?\s+(?:de\s+)?([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
+    rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
 motor.RE_CONTENANT_MULTIPLIE = re.compile(
-    rf"^\s*(\d+)\s*({_MOTS_REGEX})s?\s+(?:de\s+)?([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
+    rf"^\s*(\d+)\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
 motor.RE_TRIPLE = re.compile(
     rf"^\s*(\d+)\s*x\s*(\d+)\s*x\s*([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
 motor.RE_DOUBLE = re.compile(
@@ -120,6 +129,7 @@ motor.CONTENANT_ABREGE = {
     "carton": "CARTON", "poche": "POCHE", "bouteille": "BOUTEILLE", "bouteile": "BOUTEILLE",
     "cageot": "CAGEOT", "boite": "BOITE", "boîte": "BOITE", "filet": "FILET",
     "caisse": "CAISSE", "plaque": "PLAQUE", "plateau": "PLATEAU", "clayette": "CLAYETTE",
+    "bac": "BAC", "coffret": "COFFRET", "plaquette": "PLAQUETTE",
 }
 
 # Abréviations déjà utilisées telles quelles dans certains fichiers sources (ex: le fichier
@@ -308,7 +318,14 @@ motor.recipient_conditionnement = recipient_conditionnement_etendu
 ALIAS_UNITE_REF = {"pc": "unité"}
 
 RE_CONTENANT_NX_M_PIECES = re.compile(
-    rf"^\s*({_MOTS_REGEX})s?\s+(?:de\s+)?(\d+)\s*x\s*(\d+)\s*pi[eè]ces?\s*$", re.I)
+    rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?(\d+)\s*x\s*(\d+)\s*(?:pi[eè]ces?|u)\s*$", re.I)
+
+# "COLIS DE 12 BARQUETTES", "COLIS DE 12 BOTTES" : récipient extérieur contenant N récipients
+# nommés (pas littéralement "pièces"), sans aucun poids donné. Le récipient intérieur EST la
+# pièce vendue (comme 'sachet' dans 'CARTON 14 SACHETS DE 350 GR'), le récipient extérieur est
+# ce qui se commande.
+RE_CONTENANT_PUIS_CONTENANT_SEUL = re.compile(
+    rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?(\d+)\s*({_MOTS_REGEX})s?\s*$", re.I)
 
 # Plusieurs références dans une même cellule (une ligne par référence séparée par une
 # virgule ou un retour à la ligne, ex: '43582, 4353, 43521, 43619' ou '813072 - Mexicaine\n
@@ -380,6 +397,22 @@ def piece_carton_candidats(unite_ref, conditionnement):
         # contenant divisé en N parts (ratio = 1, ex: 'PLAQUE DE 30 PIECES' = un gâteau coupé
         # en 30 parts, vendu entier) — le 1 est ajouté comme candidat valable lui aussi.
         return [1, n], motor.normalise_texte(mot_ext), None, None, None, None
+    m = RE_CONTENANT_PUIS_CONTENANT_SEUL.match(conditionnement)
+    if m and motor.normalise_texte(m.group(1)) != motor.normalise_texte(m.group(3)):
+        mot_ext, n, mot_int = m.group(1), int(m.group(2)), m.group(3)
+        # Même logique que RE_CONTENANT_PIECES_SEULEMENT (1 = contenant entier vendu en un
+        # seul morceau, n = pièces séparées), mais avec un récipient intérieur nommé (pas
+        # juste "pièces") : il devient l'unité de référence si confirmé, le récipient
+        # extérieur reste l'unité de commande (imbrication à un niveau, pas de poids connu).
+        return ([1, n], motor.normalise_texte(mot_int), None, None,
+                motor.normalise_texte(mot_ext), n)
+    m = RE_LOT_PIECES_SEULEMENT.match(conditionnement)
+    if m:
+        # "LOT DE 4 PIECES" : aucun récipient nommé, juste un comptage — le marqueur 'lot'
+        # n'est PAS un contenant (volontairement absent de CONTENANT_ABREGE) : les chemins qui
+        # décident de l'unité de commande doivent le traiter comme équivalent à "pas de mot_piece
+        # du tout", pour que 'LOT DE N' soit proposé normalement.
+        return [1, int(m.group(1))], "lot", None, None, None, None
     # Multiplicateur SANS récipient nommé ('100 x 10g', '4 x 125g') : quand l'unité de
     # référence est déjà à la pièce, c'est N qui doit correspondre au ratio (comparaison par
     # pièce), PAS un total en kg/L à recalculer — contrairement à determine_base_et_quantite(),
@@ -451,7 +484,7 @@ def determine_base_et_quantite(conditionnement):
 _MOTS_CONTENANT_CANONIQUES = [
     "sac", "seau", "brique", "barquette", "bidon", "outre", "colis", "pot", "sachet",
     "carton", "poche", "cageot", "boite", "boîte", "filet", "bouteille", "caisse", "plaque",
-    "plateau", "clayette", "piece",
+    "plateau", "clayette", "bac", "coffret", "plaquette", "piece",
 ]
 _MOTS_CONTENANT_CONNUS = set(MOTS_CONTENANT) | {"piece", "pièce"}
 
@@ -651,17 +684,44 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
             if motor.normalise_texte(unite_ref) not in ("pc", "piece", "pièce", "unite", "unité"):
                 r.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
                 r.commentaire_d = f"Unité de référence normalisée de '{unite_ref}' vers 'PC'."
+            if mot_ext_imbrique:
+                # Le ratio ne confirme pas le nombre de pièces intérieures, mais le récipient
+                # EXTÉRIEUR décrit dans le conditionnement reste fiable (texte explicite) —
+                # on le reprend quand même en unité de commande, que candidat_ok soit 1 (tout
+                # le contenant vendu en un seul morceau) ou ne corresponde à rien.
+                l_novo = motor.CONTENANT_ABREGE.get(mot_ext_imbrique, mot_ext_imbrique.upper())
+                if motor.normalise_texte(l_novo) != motor.normalise_texte(unite_cmd):
+                    r.nouveau_l = l_novo
+                    r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+                    r.commentaire_l = (
+                        f"Unité de commande changée en '{l_novo}' d'après le conditionnement "
+                        f"('{conditionnement}').")
 
-        if (candidat_ok is not None and candidat_ok == total_pieces and not mot_piece
+        if (candidat_ok is not None and candidat_ok == total_pieces
+                and mot_piece in (None, "lot")
                 and motor.normalise_texte(unite_cmd) != f"lot de {total_pieces}"):
-            # Aucun récipient nommé dans le conditionnement ('100 x 10g', '4 x 125g') — le
-            # ratio confirme bien un LOT de N pièces, pas un poids total à recalculer.
+            # Aucun récipient PHYSIQUE nommé dans le conditionnement — soit aucun mot du tout
+            # ('100 x 10g', '4 x 125g'), soit le marqueur 'lot' ('LOT DE 4 PIECES', qui ne
+            # désigne pas un récipient mais directement un lot) — le ratio confirme bien un
+            # LOT de N pièces, pas un poids total à recalculer.
             r.nouveau_l = f"LOT DE {total_pieces}"
             r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
             r.commentaire_l = (
                 f"Unité de commande précisée en 'LOT DE {total_pieces}' : le ratio Prix "
                 f"commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) "
                 f"correspond au conditionnement ('{conditionnement}'), sans récipient nommé.")
+        elif mot_piece and mot_piece != "lot" and not mot_ext_imbrique:
+            # Récipient nommé dans le conditionnement ('COLIS DE 15 PIECES' -> 'colis') : on le
+            # reprend dans l'unité de commande, QUE LE RATIO confirme ou non le nombre de
+            # pièces — le nom du récipient vient directement du texte (fiable), indépendamment
+            # de la cohérence du prix (qui reste signalée séparément si besoin).
+            l_novo = motor.CONTENANT_ABREGE.get(mot_piece, mot_piece.upper())
+            if motor.normalise_texte(l_novo) != motor.normalise_texte(unite_cmd):
+                r.nouveau_l = l_novo
+                r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+                r.commentaire_l = (
+                    f"Unité de commande changée en '{l_novo}' d'après le conditionnement "
+                    f"('{conditionnement}').")
 
         if poids_piece and not poids_ref:
             # Le poids d'UNE pièce est écrit explicitement dans le conditionnement (ex: 'DE
@@ -688,6 +748,23 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                 f"Poids à l'unité de référence renseigné à partir du conditionnement "
                 f"('{conditionnement}') : {poids_piece} {base_unite.upper()} par {unite_designee} "
                 f"{precision_quantite}. {confirmation}")
+        elif (mot_piece and candidat_ok == total_pieces and not poids_ref):
+            # Récipient nommé ('COLIS DE 32 PIECES', 'COFFRET DE 100 PIECES'...) ou marqueur
+            # 'lot' ('LOT DE N PIECES') ne donnant aucun poids — mais une fois le nombre de
+            # pièces confirmé par le ratio (donc la pièce elle-même bien identifiée), le poids
+            # unitaire se lit souvent dans la Désignation (fournisseur ou article), ex:
+            # '(125Gx4)x12', '(100Gx4x8)' -> 0.125/0.100 kg par pièce (seul le PREMIER poids
+            # trouvé compte : c'est celui d'une pièce, pas le poids total du contenant).
+            poids_trouve, base_trouvee = motor.extraire_quantite_designation(desig_fourn or "")
+            if not poids_trouve:
+                poids_trouve, base_trouvee = motor.extraire_quantite_designation(designation or "")
+            if poids_trouve and base_trouvee == "kg":
+                r.nouveau_e = round(poids_trouve, 3)
+                r.explication_e = (
+                    f"Poids à l'unité de référence renseigné à {round(poids_trouve, 3)} kg "
+                    f"d'après la désignation, confirmé par le ratio Prix commande ÷ Prix "
+                    f"référence ({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) qui correspond "
+                    f"bien à {total_pieces} pièces.")
 
         if candidat_ok is None:
             r.couleur_m = motor.COULEUR_RATIO_SUSPECT
@@ -1081,7 +1158,13 @@ def reconsidere_recipient_de_1_unite(resultat, unite_ref, unite_cmd, conditionne
 
 
 RE_CONTENANT_PIECES_SEULEMENT = re.compile(
-    rf"^\s*({_MOTS_REGEX})s?\s+(?:de\s+)?(\d+)\s*pi[eè]ces?\s*$", re.I)
+    rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?(\d+)\s*(?:pi[eè]ces?|u)\s*$", re.I)
+
+# "LOT DE N PIECES" (ex: yaourts vendus en lot de 2/4/6/8) : même logique que ci-dessus, mais
+# "lot" n'est volontairement PAS un récipient physique (pas dans _MOTS_REGEX) — c'est un
+# simple marqueur de comptage, jamais un nom à reprendre tel quel dans l'unité de commande
+# (voir le marqueur spécial 'lot' dans piece_carton_candidats()).
+RE_LOT_PIECES_SEULEMENT = re.compile(r"^\s*lots?\s+(?:de\s+)?(\d+)\s*pi[eè]ces?\s*$", re.I)
 
 # Multiplicateur explicite devant un mot de récipient, n'importe où dans un texte libre non
 # structuré (ex: 'sous-atmosphère - 4 barquettes de 400g') — contrairement aux motifs stricts
@@ -1938,10 +2021,23 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
         ok, message = verifie_unite_commande_etendue(unite_cmd_a_verifier, conditionnement,
                                                        designation)
         if not ok:
-            # Jamais de commentaire sur l'unité de commande : la couleur seule suffit.
+            # Le récipient nommé dans le Conditionnement reste fiable même quand la quantité
+            # ne peut pas être confirmée (ex: 'CARTON 10 POCHE', aucun poids donné) — on le
+            # reprend directement, sauf quand l'unité de commande actuelle est déjà KG/L
+            # (commander au poids reste un choix valable, voir plus haut dans cette fonction).
+            base_cmd_actuelle = motor.normalise_texte(unite_cmd_a_verifier)
+            mot_trouve = (None if base_cmd_actuelle in ("kg", "l", "litre")
+                          else mot_contenant_dans_conditionnement(conditionnement))
+            abrege = motor.CONTENANT_ABREGE.get(mot_trouve, mot_trouve.upper()) if mot_trouve else None
             cel_l = ws.cell(row=ligne, column=fournisseur["unite_cmd"])
-            cel_l.fill = PatternFill(start_color=motor.COULEUR_COMMANDE_SUSPECTE,
-                                      end_color=motor.COULEUR_COMMANDE_SUSPECTE, fill_type="solid")
+            if abrege and motor.normalise_texte(abrege) != base_cmd_actuelle:
+                cel_l.value = abrege
+                cel_l.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
+                                          end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+            else:
+                # Jamais de commentaire sur l'unité de commande : la couleur seule suffit.
+                cel_l.fill = PatternFill(start_color=motor.COULEUR_COMMANDE_SUSPECTE,
+                                          end_color=motor.COULEUR_COMMANDE_SUSPECTE, fill_type="solid")
             total += 1
 
     col_origine = fournisseur.get("origine")
@@ -2298,6 +2394,36 @@ def gele_formules_externes(ws, ws_valeurs):
     return total
 
 
+def derive_unite_ref_vide(ws_valeurs, ligne, fournisseurs):
+    """Quand l'unité de référence est vide, tente de la déduire d'un Conditionnement propre
+    (motif reconnu, pas une recherche floue) dont la quantité est EXACTEMENT confirmée par le
+    ratio Prix de commande ÷ Prix de référence d'un fournisseur rempli. Si plusieurs
+    fournisseurs sont remplis et se contredisent (bases différentes), on ne déduit rien —
+    mieux vaut laisser vide à compléter que de deviner sur un désaccord."""
+    bases_confirmees = set()
+    for f in fournisseurs:
+        conditionnement = ws_valeurs.cell(row=ligne, column=f["cond"]).value
+        prix_ref = ws_valeurs.cell(row=ligne, column=f["prix_ref"]).value
+        prix_cmd = ws_valeurs.cell(row=ligne, column=f["prix_cmd"]).value
+        if not conditionnement or not prix_ref or not prix_cmd:
+            continue
+        info = determine_base_et_quantite(nettoie_conditionnement(conditionnement))
+        if not info:
+            continue
+        base, quantite, _mot = info
+        if not quantite or quantite <= 0:
+            continue
+        try:
+            ratio = prix_cmd / prix_ref
+        except (TypeError, ZeroDivisionError):
+            continue
+        if abs(ratio - quantite) <= motor.TOLERANCE_RATIO * quantite:
+            bases_confirmees.add(base)
+    if len(bases_confirmees) == 1:
+        return bases_confirmees.pop()
+    return None
+
+
 def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
     gele_formules_externes(ws, ws_valeurs)
     ligne_debut = info["ligne_debut_donnees"]
@@ -2406,14 +2532,25 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
             poids_texte_marque = True
 
         if not unite_ref:
-            # Pas de commentaire ici : la couleur seule suffit (vide = à compléter), un
-            # commentaire par ligne alourdit le fichier pour rien.
-            cel_vide = ws.cell(row=ligne, column=col_unite_ref)
-            cel_vide.fill = PatternFill(start_color=motor.COULEUR_A_VERIFIER,
-                                         end_color=motor.COULEUR_A_VERIFIER, fill_type="solid")
-            stats["unite_ref_vide"] += 1
-            stats["marques"] += 1
-            continue
+            base_deduite = derive_unite_ref_vide(ws_valeurs, ligne, fournisseurs)
+            if base_deduite:
+                # Conditionnement + ratio de prix confirment exactement la base : on remplit
+                # avec confiance (couleur seule, pas de commentaire), au lieu de signaler vide.
+                unite_ref = base_deduite.upper()
+                cel_remplie = ws.cell(row=ligne, column=col_unite_ref)
+                cel_remplie.value = unite_ref
+                cel_remplie.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
+                                                end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+                stats["marques"] += 1
+            else:
+                # Pas de commentaire ici : la couleur seule suffit (vide = à compléter), un
+                # commentaire par ligne alourdit le fichier pour rien.
+                cel_vide = ws.cell(row=ligne, column=col_unite_ref)
+                cel_vide.fill = PatternFill(start_color=motor.COULEUR_A_VERIFIER,
+                                             end_color=motor.COULEUR_A_VERIFIER, fill_type="solid")
+                stats["unite_ref_vide"] += 1
+                stats["marques"] += 1
+                continue
 
         # Force la casse en MAJUSCULES dès maintenant (jamais marqué) : couvre aussi les
         # lignes où AUCUN fournisseur n'a de prix (donc audite_fournisseur() ne s'exécute
