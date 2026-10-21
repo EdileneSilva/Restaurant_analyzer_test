@@ -2116,10 +2116,8 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
 
         if resultat.couleur_d in COULEURS_INCOHERENCE and resultat.commentaire_d and (
                 d_differe or resultat.nouveau_d is None):
-            # Pas de commentaire sur l'unité de référence : la couleur seule suffit.
-            cel_d = ws.cell(row=ligne, column=fournisseur["_col_unite_ref"])
-            cel_d.fill = PatternFill(start_color=resultat.couleur_d,
-                                      end_color=resultat.couleur_d, fill_type="solid")
+            marque(ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]), resultat.couleur_d,
+                   fournisseur["nom"], resultat.commentaire_d)
             total += 1
         if resultat.couleur_k in COULEURS_INCOHERENCE and resultat.commentaire_k and (
                 k_differe or resultat.nouveau_k is None):
@@ -2128,11 +2126,8 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
             total += 1
         if resultat.couleur_l in COULEURS_INCOHERENCE and resultat.commentaire_l and (
                 l_differe or resultat.nouveau_l is None):
-            # Jamais de commentaire sur l'unité de commande : la couleur seule suffit (quelle
-            # que soit la couleur — changement confiant ou simple palpite à vérifier).
-            cel_l = ws.cell(row=ligne, column=fournisseur["unite_cmd"])
-            cel_l.fill = PatternFill(start_color=resultat.couleur_l,
-                                      end_color=resultat.couleur_l, fill_type="solid")
+            marque(ws.cell(row=ligne, column=fournisseur["unite_cmd"]), resultat.couleur_l,
+                   fournisseur["nom"], resultat.commentaire_l)
             total += 1
         if resultat.couleur_m in COULEURS_INCOHERENCE and resultat.commentaire_m:
             marque(ws.cell(row=ligne, column=fournisseur["prix_cmd"]), resultat.couleur_m,
@@ -2206,12 +2201,11 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
             cel_l = ws.cell(row=ligne, column=fournisseur["unite_cmd"])
             if abrege and motor.normalise_texte(abrege) != base_cmd_actuelle:
                 cel_l.value = abrege
-                cel_l.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
-                                          end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+                marque(cel_l, motor.COULEUR_UNITE_TRANSFORMEE, fournisseur["nom"],
+                       f"Unité de commande changée en '{abrege}' d'après le conditionnement "
+                       f"('{conditionnement}').")
             else:
-                # Jamais de commentaire sur l'unité de commande : la couleur seule suffit.
-                cel_l.fill = PatternFill(start_color=motor.COULEUR_COMMANDE_SUSPECTE,
-                                          end_color=motor.COULEUR_COMMANDE_SUSPECTE, fill_type="solid")
+                marque(cel_l, motor.COULEUR_COMMANDE_SUSPECTE, fournisseur["nom"], message)
             total += 1
 
     col_origine = fournisseur.get("origine")
