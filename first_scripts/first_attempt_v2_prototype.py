@@ -654,13 +654,13 @@ def traite_ligne(unite_ref, poids_ref, designation, conditionnement, unite_cmd, 
                     r.nouveau_k = nouveau_k
                     r.nouveau_e = "VIDER"
                     r.couleur_d = COULEUR_UNITE_TRANSFORMEE
-                    r.couleur_k = COULEUR_UNITE_TRANSFORMEE
+                    r.couleur_k = COULEUR_RATIO_SUSPECT
                     r.commentaire_k = (
                         f"Le poids de référence (E={poids}) indique que le prix de référence "
                         f"({prix_ref}) était en fait donné pour {poids} {base_actuelle.lower()}, "
-                        f"pas pour 1. Prix normalisé = {prix_ref} / {poids} = {nouveau_k} "
-                        f"€/{base_actuelle.lower()}. Le prix de commande ({prix_cmd}) n'est "
-                        "PAS modifié — il reste le prix réel de commande.")
+                        f"pas pour 1. Prix de référence suggéré = {prix_ref} / {poids} = "
+                        f"{nouveau_k} €/{base_actuelle.lower()} — à vérifier, non modifié "
+                        "automatiquement. Le prix de commande n'est pas modifié non plus.")
                     k_final = nouveau_k
             except (TypeError, ValueError):
                 pass
@@ -766,12 +766,8 @@ def traite_ligne(unite_ref, poids_ref, designation, conditionnement, unite_cmd, 
             r.nouveau_d = "PC"
             if poids_kg:
                 r.nouveau_e = formata_poids_kg(poids_kg)
-            r.couleur_d = COULEUR_UNITE_TRANSFORMEE
-            r.commentaire_d = (
-                f"Unité uniformisée de '{unite_ref}' vers 'PC' : le prix de commande "
-                f"({prix_cmd}) est déjà égal au prix de référence ({prix_ref}), signe que la "
-                "comparaison se fait volontairement à la pièce (ex : une baguette). Prix "
-                "inchangés.")
+            # Pas de couleur/commentaire ici : 'unité'/'piece' -> 'PC' n'est qu'une nomenclature
+            # (pas un changement d'unité réel), rien à signaler.
             return r
 
         if not designation_approximative:
@@ -782,11 +778,12 @@ def traite_ligne(unite_ref, poids_ref, designation, conditionnement, unite_cmd, 
                 r.nouveau_k = nouveau_k
                 r.nouveau_e = "VIDER"
                 r.couleur_d = COULEUR_UNITE_TRANSFORMEE
-                r.couleur_k = COULEUR_UNITE_TRANSFORMEE
+                r.couleur_k = COULEUR_RATIO_SUSPECT
                 r.commentaire_k = (
                     f"Unité convertie de '{unite_ref}' vers 'KG' : poids de référence retenu "
-                    f"= {round(poids, 4)} kg. Prix normalisé = {prix_ref} / {round(poids, 4)} "
-                    f"= {nouveau_k} €/kg.{avertissement} Le prix de commande n'est PAS modifié.")
+                    f"= {round(poids, 4)} kg. Prix de référence suggéré = {prix_ref} / "
+                    f"{round(poids, 4)} = {nouveau_k} €/kg.{avertissement} À vérifier, non "
+                    "modifié automatiquement.")
                 return r
 
         r.nouveau_d = "PC"
@@ -843,14 +840,14 @@ def traite_ligne(unite_ref, poids_ref, designation, conditionnement, unite_cmd, 
             if poids_ref_num:
                 r.nouveau_e = formata_poids_kg(poids_ref_num)
             r.couleur_d = COULEUR_UNITE_TRANSFORMEE
-            r.couleur_k = COULEUR_UNITE_TRANSFORMEE
+            r.couleur_k = COULEUR_RATIO_SUSPECT
             r.couleur_l = COULEUR_UNITE_TRANSFORMEE
             r.commentaire_k = (
                 f"Le conditionnement ('{conditionnement}') décrit {nb_pieces} pièces, pas un "
-                f"poids total — comparaison au marché à la pièce. Prix de référence par pièce = "
-                f"prix de commande ÷ nombre de pièces = {prix_cmd} / {nb_pieces} = {nouveau_k} "
-                f"€/pièce. Le prix de commande n'est PAS modifié ; l'unité de commande reprend "
-                f"le contenant d'origine ('{unite_ref}').")
+                f"poids total — comparaison au marché à la pièce. Prix de référence par pièce "
+                f"suggéré = prix de commande ÷ nombre de pièces = {prix_cmd} / {nb_pieces} = "
+                f"{nouveau_k} €/pièce — à vérifier, non modifié automatiquement. L'unité de "
+                f"commande reprend le contenant d'origine ('{unite_ref}').")
             r.commentaire_l = r.commentaire_k
             return r
 
@@ -865,12 +862,12 @@ def traite_ligne(unite_ref, poids_ref, designation, conditionnement, unite_cmd, 
             r.nouveau_k = nouveau_k
             r.nouveau_e = "VIDER"
             r.couleur_d = COULEUR_UNITE_TRANSFORMEE
-            r.couleur_k = COULEUR_UNITE_TRANSFORMEE
+            r.couleur_k = COULEUR_RATIO_SUSPECT
             r.commentaire_k = (
                 f"Unité convertie de '{unite_ref}' vers '{base.upper()}' : quantité de "
-                f"référence retenue = {round(poids, 4)} {base}. Prix normalisé = {prix_ref} / "
-                f"{round(poids, 4)} = {nouveau_k} €/{base}.{avertissement} "
-                "Le prix de commande n'est PAS modifié.")
+                f"référence retenue = {round(poids, 4)} {base}. Prix de référence suggéré = "
+                f"{prix_ref} / {round(poids, 4)} = {nouveau_k} €/{base}.{avertissement} À "
+                "vérifier, non modifié automatiquement.")
         else:
             r.couleur_d = COULEUR_A_VERIFIER
             r.commentaire_d = (

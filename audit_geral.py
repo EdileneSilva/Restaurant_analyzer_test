@@ -40,6 +40,7 @@ import os
 import re
 import statistics
 import sys
+import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import first_scripts.first_attempt_v2_prototype as motor  # noqa: E402  (règles de cohérence déjà validées)
@@ -64,9 +65,11 @@ DOSSIER_SORTIE = os.path.join(DOSSIER_PROJET, "transformed_files")
 # ============================================================================
 
 MOTS_CONTENANT = ["sac", "seau", "brique", "barquette", "barq", "bidon", "outre", "colis",
-                  "pot", "sachet", "carton", "poche", "cageot", "boite", "filet", "bouteille",
+                  "pot", "sachet", "carton", "poche", "cageot", "boite", "boîte", "filet",
+                  "bouteille",
                   "bouteile",  # faute de frappe fréquente ('BOUTEILES', 1 seul L)
-                  "caisse", "plaque", "plateau", "clayette", "pack", "gourde", "botte"]
+                  "caisse", "plaque", "plateau", "clayette", "pack", "gourde", "botte",
+                  "bac", "coffret", "plaquette", "paquet", "etui", "étui", "bombe"]
 _MOTS_REGEX = "pi[eè]ce|" + "|".join(MOTS_CONTENANT)
 
 # "GR" (abréviation très fréquente de gramme) est absent du vocabulaire d'origine, qui ne
@@ -79,11 +82,41 @@ motor.FACTEUR_VERS_KG_OU_L["gr"] = 0.001
 motor.base_depuis_unite = lambda unite: (
     "kg" if unite.lower() in ("kg", "kilo", "g", "gr", "gramme", "mg") else "l")
 
+# Tolérance utilisée partout pour valider un ratio Prix commande ÷ Prix référence contre une
+# quantité attendue (5 % jugé trop permissif — abaissé à 2 %).
+motor.TOLERANCE_RATIO = 0.02
+
+# Palette de couleurs simplifiée (demandée pour remplacer les 8 couleurs d'origine, dont
+# certaines se recouvraient sémantiquement) :
+# - Mudança direta / changement confirmé (D/K/L recalculés OU LOT confirmé par le ratio,
+#   mêmes conventions, aucune vraie différence) : une seule couleur.
+# - Signalements "incohérence" / "sans explication" : chacun sa couleur, mais fusionnés entre
+#   les variantes qui ne faisaient de toute façon que des doublons historiques.
+# - Cellule vide / aucune conversion fiable : gris neutre.
+# - Copie possible (même Référence+prix, ou même Désignation de l'article) : une seule couleur.
+# - Ligne dupliquée entière : reste en rouge plein (inchangé).
+motor.COULEUR_LOT_CONFIRME = motor.COULEUR_UNITE_TRANSFORMEE = "FF93CDDC"
+motor.COULEUR_A_VERIFIER = "FFBFBFBF"
+motor.COULEUR_RATIO_SUSPECT = motor.COULEUR_COMMANDE_SUSPECTE = "FFD5A6BD"
+motor.COULEUR_COUSTERON = motor.COULEUR_PRIX_INEXPLIQUE = "FF92D050"
+motor.COULEUR_COPIE_POSSIBLE = "FFFF6969"
+
 motor.PACKAGE_TYPES = tuple(MOTS_CONTENANT)
+# Un ou plusieurs mots qualificatifs (matière, ou...) insérés entre le récipient et sa
+# quantité ('CAISSE BOIS 10 KG', 'CAGEOT BOIS OU CARTON 5KG', 'COLIS NUE 2 KG'...) — observé
+# dans des fichiers réels, mots variables (bois/carton/nue/poly/verre/ou...), jamais une liste
+# fermée à maintenir : on tolère n'importe quelle suite de mots ALPHABÉTIQUES à cet endroit
+# (jamais "de" lui-même, pour ne pas interférer avec l'alternative "(?:de\s+)?" déjà
+# existante). Le récipient retenu reste le premier mot (groupe 1, ancré en ^) : les mots
+# suivants ne sont que des qualificatifs de matière, jamais un second récipient. Un marqueur
+# de comptage collé 'x<N>' ('COLIS X960 5 KG' : un colis de 960 pièces, 5 kg au total) est
+# toléré ici de la même façon — il décrit le nombre de pièces, une information à part du poids
+# total qui suit, pas un second récipient non plus.
+_MOT_QUALIFICATIF = r"(?:(?!de\b)(?:[A-Za-zÀ-ÿ]+|x\d+)\s+)*"
 motor.RE_TYPE = re.compile(
-    rf"^\s*({_MOTS_REGEX})s?\s+(?:de\s+)?([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
+    rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
 motor.RE_CONTENANT_MULTIPLIE = re.compile(
-    rf"^\s*(\d+)\s*({_MOTS_REGEX})s?\s+(?:de\s+)?([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
+    rf"^\s*(\d+)\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
 motor.RE_TRIPLE = re.compile(
     rf"^\s*(\d+)\s*x\s*(\d+)\s*x\s*([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
 motor.RE_DOUBLE = re.compile(
@@ -101,9 +134,17 @@ motor.CONTENANT_ABREGE = {
     "barquette": "BARQUETTE", "barq": "BARQUETTE",
     "bidon": "BIDON", "outre": "OUTRE", "colis": "COLIS", "pot": "POT", "sachet": "SACHET",
     "carton": "CARTON", "poche": "POCHE", "bouteille": "BOUTEILLE", "bouteile": "BOUTEILLE",
-    "cageot": "CAGEOT", "boite": "BOITE", "filet": "FILET",
+    "cageot": "CAGEOT", "boite": "BOITE", "boîte": "BOITE", "filet": "FILET",
     "caisse": "CAISSE", "plaque": "PLAQUE", "plateau": "PLATEAU", "clayette": "CLAYETTE",
+    "bac": "BAC", "coffret": "COFFRET", "plaquette": "PLAQUETTE", "paquet": "PAQUET",
+    "etui": "ETUI", "étui": "ETUI", "bombe": "BOMBE",
 }
+
+# Abréviations déjà utilisées telles quelles dans certains fichiers sources (ex: le fichier
+# MDC abrège systématiquement "barquette" en "BQT") — on uniformise vers le mot en entier
+# (standardisation voulue), mais SANS marquer la cellule : ce n'est pas une incohérence,
+# juste une autre façon d'écrire la même chose.
+ABREVIATIONS_CONTENANT_RECONNUES = {"bqt": "barquette"}
 
 # "SV" / "S/V" (sous-vide) apparaît comme mot inséré entre le récipient et sa quantité
 # ('PIECE SV DE 7 KG') — on le retire avant toute analyse du Conditionnement, ce qui
@@ -128,6 +169,14 @@ def nettoie_conditionnement(texte):
         return texte
     propre = RE_SV.sub("", texte)
     propre = RE_QUALIFICATIF_CONTENANT.sub("", propre)
+    # Parenthèse finale purement informative (ex: '(15 TR)' pour 'tranches'), sans aucune
+    # quantité reconnue dedans — on la retire : elle casse sinon la détection du motif propre,
+    # qui doit se terminer exactement après la quantité (ex: 'POCHE SV DE 1KG (15 TR)'). Si la
+    # parenthèse contient elle-même une quantité reconnue (ex: '(2,2L)'), on la laisse — elle
+    # porte potentiellement une information utile ailleurs.
+    m_parenthese = re.search(r"\s*\(([^()]*)\)\s*$", propre)
+    if m_parenthese and not motor.RE_LIBRE.search(m_parenthese.group(1)):
+        propre = propre[:m_parenthese.start()]
     propre = re.sub(r"\s{2,}", " ", propre).strip(" ,")
     return propre
 
@@ -152,12 +201,37 @@ RE_CONTENANT_IMBRIQUE = re.compile(
 RE_CONTENANT_PUIS_MULT = re.compile(
     rf"^\s*({_MOTS_REGEX})s?\s+(?:de\s+)?(\d+)\s*x\s*([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
 
+# Même chose que RE_CONTENANT_PUIS_MULT, mais avec 'x' (pas 'de') AVANT le premier nombre, et
+# un mot 'ST'/'SACHET(S)' collé juste après ce nombre ('CARTON X 5 ST X 1 KG' : un carton de 5
+# sachets de 1 kg chacun, 5 kg au total) — 'st' n'est PAS ajouté au vocabulaire général des
+# récipients (trop court, risque de faux positifs ailleurs) : il n'est reconnu qu'à cette
+# position précise, entre le nombre de sous-unités et le second 'x'.
+RE_CONTENANT_PUIS_MULT_SACHET = re.compile(
+    rf"^\s*({_MOTS_REGEX})s?\s+(?:de|x)\s+(\d+)\s*(?:st|sachets?)\.?\s*x\s*([\d,.]+)\s*({_UNITES_REGEX})\s*$",
+    re.I)
+
+# Même chose que RE_CONTENANT_PUIS_MULT, mais dans l'ordre inverse — le poids D'UNE pièce
+# d'abord, puis le nombre de pièces collé en 'x<N>' ('COLIS 30 G X144' : 144 pièces de 30 g
+# chacune, pas 30 g au total) — observé dans les mêmes fichiers que le motif 'CONTENANT x<N>
+# POIDS' ci-dessus (voir _MOT_QUALIFICATIF), juste avec le poids et le compte intervertis.
+RE_CONTENANT_POIDS_PUIS_X = re.compile(
+    rf"^\s*({_MOTS_REGEX})s?\s+(?:de\s+)?([\d,.]+)\s*({_UNITES_REGEX})\s*x\s*(\d+)\s*$", re.I)
+
 # Triple imbrication ("CARTON DE 8 PACKS DE 4 GOURDES DE 90 GR" : un carton de 8 packs,
 # chaque pack contenant 4 gourdes de 90g) — la "pièce" vendue est le niveau INTERMÉDIAIRE (le
 # pack), pas le carton entier ni la gourde individuelle ; voir piece_carton_candidats().
 RE_CONTENANT_TRIPLE_IMBRIQUE = re.compile(
     rf"^\s*({_MOTS_REGEX})s?\s+(?:de\s+)?(\d+)\s*({_MOTS_REGEX})s?\s+(?:de\s+)?(\d+)\s*"
     rf"({_MOTS_REGEX})s?\s+(?:de\s+)?([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
+
+# Unité de référence elle-même écrite comme "CONTENANT DE N" (ex: 'plateau de 60', 'caisse de
+# 180') — observé dans Base IANOR AGAPE 16 (œufs), où ce texte est à la fois l'unité de
+# référence ET le conditionnement, sans aucun poids. Contrairement à tous les motifs ci-dessus
+# (qui s'appliquent au Conditionnement quand l'unité de référence est DÉJÀ 'PC'), celui-ci
+# s'applique à l'unité de référence elle-même : le nombre total (N) doit correspondre au
+# ratio Prix commande ÷ Prix référence pour que la conversion en 'PC' (prix par pièce
+# individuelle, comparable entre fournisseurs quel que soit le conditionnement) soit confirmée.
+RE_CONTENANT_SEUL_SANS_POIDS = re.compile(rf"^\s*({_MOTS_REGEX})s?\s+de\s+(\d+)\s*$", re.I)
 
 # "2 PIECES DE 2 KG" (= 4 kg au total) : aucun récipient n'est nommé, la ligne commence
 # directement par "N PIECES DE Qté" — quand l'unité de référence est au kg/L, le nombre de
@@ -216,6 +290,22 @@ def extraire_quantite_designation_etendue(designation):
 
 motor.extraire_quantite_designation = extraire_quantite_designation_etendue
 
+
+def extraire_dernier_poids_designation(designation):
+    """Comme extraire_quantite_designation_etendue, mais renvoie le DERNIER nombre+unité
+    trouvé, pas le premier — utile quand la désignation détaille d'abord un poids PAR PIÈCE
+    avant de donner le poids TOTAL du contenant entier (ex: 'GALETTES (100X15GR) 1.5 KG' :
+    15GR est le poids d'une galette, 1.5KG est le poids total des 100 — c'est ce dernier qu'il
+    faut retenir quand le ratio confirme que le prix est pour le contenant entier, pas pour une
+    pièce)."""
+    if not designation:
+        return None, None
+    trouvailles = RE_QUANTITE_DESIGNATION.findall(str(designation))
+    if not trouvailles:
+        return None, None
+    qty, unite = trouvailles[-1]
+    return motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()], motor.base_depuis_unite(unite)
+
 _mot_type_conditionnement_original = motor.mot_type_conditionnement
 
 
@@ -267,8 +357,22 @@ motor.recipient_conditionnement = recipient_conditionnement_etendu
 # d'origine dans les commentaires, pour ne pas modifier le fichier source partagé.
 ALIAS_UNITE_REF = {"pc": "unité"}
 
+# Mot de comptage final ('pièces', 'tranches', 'portions', 'biscuits'...) : jamais une liste
+# fermée à maintenir (le mot varie selon le produit : tranches de pain, biscuits, galettes...),
+# donc on accepte N'IMPORTE QUEL mot à cet endroit — SAUF une unité de poids/volume reconnue
+# ('kg', 'g'...), qui doit rester traitée par les motifs dédiés au poids (RE_TYPE,
+# RE_CONTENANT_MULTIPLIE...), jamais confondue avec un simple compte de pièces.
+_MOT_COMPTAGE_FINAL = rf"(?!(?:{_UNITES_REGEX})\b)[A-Za-zÀ-ÿ]+"
+
 RE_CONTENANT_NX_M_PIECES = re.compile(
-    rf"^\s*({_MOTS_REGEX})s?\s+(?:de\s+)?(\d+)\s*x\s*(\d+)\s*pi[eè]ces?\s*$", re.I)
+    rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?(\d+)\s*x\s*(\d+)\s*{_MOT_COMPTAGE_FINAL}\s*$", re.I)
+
+# "COLIS DE 12 BARQUETTES", "COLIS DE 12 BOTTES" : récipient extérieur contenant N récipients
+# nommés (pas littéralement "pièces"), sans aucun poids donné. Le récipient intérieur EST la
+# pièce vendue (comme 'sachet' dans 'CARTON 14 SACHETS DE 350 GR'), le récipient extérieur est
+# ce qui se commande.
+RE_CONTENANT_PUIS_CONTENANT_SEUL = re.compile(
+    rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?(\d+)\s*({_MOTS_REGEX})s?\s*$", re.I)
 
 # Plusieurs références dans une même cellule (une ligne par référence séparée par une
 # virgule ou un retour à la ligne, ex: '43582, 4353, 43521, 43619' ou '813072 - Mexicaine\n
@@ -298,35 +402,73 @@ def piece_carton_candidats(unite_ref, conditionnement):
         # "CARTON DE 8 PACKS DE 4 GOURDES DE 90 GR" : la "pièce" vendue est le pack
         # (niveau intermédiaire), pas la gourde individuelle ni le carton entier — le nombre
         # total de packs (N) est ce qui doit correspondre au ratio, et son poids est celui
-        # de ses M gourdes de qty chacune.
-        _mot_ext, n, mot_piece, m_inner, _mot_inner, qty, unite = m.groups()
+        # de ses M gourdes de qty chacune. mot_ext (carton) et m_inner (nombre de gourdes par
+        # pack) sont renvoyés en plus pour permettre, UNIQUEMENT dans ce cas précis confirmé
+        # par le ratio, de préciser l'unité de référence/commande au lieu de 'PC' générique
+        # (voir useful_stuff/Exemples unités et prix 6.xlsx, "CAS 3") — jamais pour les autres
+        # motifs ci-dessous, où 'PC' générique reste correct (un seul niveau de contenant).
+        mot_ext, n, mot_piece, m_inner, _mot_inner, qty, unite = m.groups()
         poids_piece = round(int(m_inner) * motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()], 3)
-        return [int(n)], motor.normalise_texte(mot_piece), poids_piece, motor.base_depuis_unite(unite)
+        return ([int(n)], motor.normalise_texte(mot_piece), poids_piece, motor.base_depuis_unite(unite),
+                motor.normalise_texte(mot_ext), int(m_inner))
     m = RE_CONTENANT_IMBRIQUE.match(conditionnement)
     if m:
-        _mot_ext, n, mot_piece, qty, unite = m.groups()
+        mot_ext, n, mot_piece, qty, unite = m.groups()
         poids_piece = round(motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()], 3)
-        return [int(n)], motor.normalise_texte(mot_piece), poids_piece, motor.base_depuis_unite(unite)
+        # '1' est ajouté comme candidat valable (contenant entier vendu en un seul morceau,
+        # ex: ratio = 1 malgré un conditionnement qui détaille N pièces de tel poids) — même
+        # logique que RE_CONTENANT_PIECES_SEULEMENT plus bas. Le récipient EXTÉRIEUR (mot_ext,
+        # ex: 'carton') n'est renvoyé en 5e position (comme pour RE_CONTENANT_TRIPLE_IMBRIQUE)
+        # QUE si le récipient intérieur est RÉEL (ex: 'bouteille' dans 'CARTON 6 BOUTEILLES DE
+        # 75 CL') : c'est alors lui l'unité de référence et le récipient extérieur l'unité de
+        # commande (même logique CAS-3 que le triple niveau). Quand l'intérieur n'est que
+        # 'piece'/'pièce' (compte générique, ex: 'CARTON 12 PIECES DE 500 GR'), mot_ext_imbrique
+        # reste None comme avant : sinon la détection "vendu au poids total, pas à la pièce"
+        # plus haut (qui exige justement 'not mot_ext_imbrique') ne s'appliquerait plus.
+        mot_piece_norm = motor.normalise_texte(mot_piece)
+        mot_ext_imbrique = motor.normalise_texte(mot_ext) if mot_piece_norm not in ("piece", "pièce") else None
+        return ([1, int(n)], mot_piece_norm, poids_piece, motor.base_depuis_unite(unite),
+                mot_ext_imbrique, None)
     m = RE_CONTENANT_PUIS_MULT.match(conditionnement)
     if m:
         mot_ext, n, qty, unite = m.groups()
         poids_piece = round(motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()], 3)
         # Le récipient nommé ('CARTON DE 8 X 250 GR') garde son nom en unité de commande —
         # "LOT DE N" est réservé aux formats SANS aucun nom de récipient ('100 x 10g').
-        return [int(n)], motor.normalise_texte(mot_ext), poids_piece, motor.base_depuis_unite(unite)
+        return [1, int(n)], motor.normalise_texte(mot_ext), poids_piece, motor.base_depuis_unite(unite), None, None
+    m = RE_CONTENANT_POIDS_PUIS_X.match(conditionnement)
+    if m:
+        mot_ext, qty, unite, n = m.groups()
+        poids_piece = round(motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()], 3)
+        return [1, int(n)], motor.normalise_texte(mot_ext), poids_piece, motor.base_depuis_unite(unite), None, None
     m = motor.RE_CONTENANT_MULTIPLIE.match(conditionnement)
     if m:
         n, mot_piece, qty, unite = m.groups()
         poids_piece = round(motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()], 3)
-        return [int(n)], motor.normalise_texte(mot_piece), poids_piece, motor.base_depuis_unite(unite)
+        return [int(n)], motor.normalise_texte(mot_piece), poids_piece, motor.base_depuis_unite(unite), None, None
     m = RE_CONTENANT_NX_M_PIECES.match(conditionnement)
     if m:
         mot_ext, n1, n2 = m.group(1), int(m.group(2)), int(m.group(3))
-        return [n1, n2, n1 * n2], motor.normalise_texte(mot_ext), None, None
+        return [n1, n2, n1 * n2], motor.normalise_texte(mot_ext), None, None, None, None
+    # Récipient extérieur contenant N récipients intérieurs NOMMÉS ('CARTON DE 12 PLAQUES',
+    # 'COLIS DE 12 BARQUETTES') : vérifié AVANT RE_CONTENANT_PIECES_SEULEMENT ci-dessous,
+    # devenu généraliste (n'importe quel mot de comptage final) — sinon ce motif plus
+    # spécifique (récipient intérieur réellement nommé) ne serait jamais atteint.
+    m = RE_CONTENANT_PUIS_CONTENANT_SEUL.match(conditionnement)
+    if (m and motor.normalise_texte(m.group(1)) != motor.normalise_texte(m.group(3))
+            and motor.normalise_texte(m.group(3)) not in ("piece", "pièce")):
+        mot_ext, n, mot_int = m.group(1), int(m.group(2)), m.group(3)
+        # Même logique que RE_CONTENANT_PIECES_SEULEMENT (1 = contenant entier vendu en un
+        # seul morceau, n = pièces séparées), mais avec un récipient intérieur nommé (pas
+        # juste "pièces") : il devient l'unité de référence si confirmé, le récipient
+        # extérieur reste l'unité de commande (imbrication à un niveau, pas de poids connu).
+        return ([1, n], motor.normalise_texte(mot_int), None, None,
+                motor.normalise_texte(mot_ext), n)
     # Récipient nommé contenant SEULEMENT un nombre de pièces, sans poids ('CAGEOT DE 30
-    # PIECES') : le poids réel est inconnu (souvent variable), mais le nombre de pièces suffit
-    # à vérifier le ratio — pas besoin de deviner un poids via la désignation pour expliquer le
-    # prix (ce qui donnerait un résultat en €/kg non pertinent ici).
+    # PIECES', 'SAC DE 100 BISCUITS') : le poids réel est inconnu (souvent variable), mais le
+    # nombre de pièces suffit à vérifier le ratio — pas besoin de deviner un poids via la
+    # désignation pour expliquer le prix (ce qui donnerait un résultat en €/kg non pertinent
+    # ici).
     m = RE_CONTENANT_PIECES_SEULEMENT.match(conditionnement)
     if m:
         mot_ext, n = m.group(1), int(m.group(2))
@@ -334,7 +476,14 @@ def piece_carton_candidats(unite_ref, conditionnement):
         # (ratio = N, ex: 'CAGEOT DE 30 PIECES' d'œufs vendus à l'unité), soit UN SEUL
         # contenant divisé en N parts (ratio = 1, ex: 'PLAQUE DE 30 PIECES' = un gâteau coupé
         # en 30 parts, vendu entier) — le 1 est ajouté comme candidat valable lui aussi.
-        return [1, n], motor.normalise_texte(mot_ext), None, None
+        return [1, n], motor.normalise_texte(mot_ext), None, None, None, None
+    m = RE_LOT_PIECES_SEULEMENT.match(conditionnement)
+    if m:
+        # "LOT DE 4 PIECES" : aucun récipient nommé, juste un comptage — le marqueur 'lot'
+        # n'est PAS un contenant (volontairement absent de CONTENANT_ABREGE) : les chemins qui
+        # décident de l'unité de commande doivent le traiter comme équivalent à "pas de mot_piece
+        # du tout", pour que 'LOT DE N' soit proposé normalement.
+        return [1, int(m.group(1))], "lot", None, None, None, None
     # Multiplicateur SANS récipient nommé ('100 x 10g', '4 x 125g') : quand l'unité de
     # référence est déjà à la pièce, c'est N qui doit correspondre au ratio (comparaison par
     # pièce), PAS un total en kg/L à recalculer — contrairement à determine_base_et_quantite(),
@@ -344,12 +493,12 @@ def piece_carton_candidats(unite_ref, conditionnement):
         n1, n2, qty, unite = m.groups()
         poids_piece = round(motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()], 3)
         n1, n2 = int(n1), int(n2)
-        return [n1, n2, n1 * n2], None, poids_piece, motor.base_depuis_unite(unite)
+        return [n1, n2, n1 * n2], None, poids_piece, motor.base_depuis_unite(unite), None, None
     m = motor.RE_DOUBLE.match(conditionnement)
     if m:
         n, qty, unite = m.groups()
         poids_piece = round(motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()], 3)
-        return [int(n)], None, poids_piece, motor.base_depuis_unite(unite)
+        return [int(n)], None, poids_piece, motor.base_depuis_unite(unite), None, None
     return None
 
 
@@ -380,6 +529,11 @@ def determine_base_et_quantite(conditionnement):
         mot_ext, n, qty, unite = m.groups()
         quantite = motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()] * int(n)
         return motor.base_depuis_unite(unite), quantite, motor.normalise_texte(mot_ext)
+    m = RE_CONTENANT_PUIS_MULT_SACHET.match(conditionnement)
+    if m:
+        mot_ext, n, qty, unite = m.groups()
+        quantite = motor._nombre(qty) * motor.FACTEUR_VERS_KG_OU_L[unite.lower()] * int(n)
+        return motor.base_depuis_unite(unite), quantite, motor.normalise_texte(mot_ext)
     m = motor.RE_CONTENANT_MULTIPLIE.match(conditionnement)
     if m and motor.normalise_texte(m.group(2)) != "piece":
         n, mot_ext, qty, unite = m.groups()
@@ -405,10 +559,31 @@ def determine_base_et_quantite(conditionnement):
 
 _MOTS_CONTENANT_CANONIQUES = [
     "sac", "seau", "brique", "barquette", "bidon", "outre", "colis", "pot", "sachet",
-    "carton", "poche", "cageot", "boite", "filet", "bouteille", "caisse", "plaque",
-    "plateau", "clayette", "piece",
+    "carton", "poche", "cageot", "boite", "boîte", "filet", "bouteille", "caisse", "plaque",
+    "plateau", "clayette", "bac", "coffret", "plaquette", "paquet", "etui", "étui", "bombe",
+    "piece",
 ]
 _MOTS_CONTENANT_CONNUS = set(MOTS_CONTENANT) | {"piece", "pièce"}
+
+
+def mot_contenant_dans_conditionnement(conditionnement):
+    """Cherche, par limite de mot (pas une sous-chaîne), le premier mot de récipient connu
+    explicitement nommé dans le Conditionnement — ex: 'COLIS DE 60 PIECES' -> 'colis' (le mot
+    le plus à gauche dans le texte l'emporte quand plusieurs sont présents, le reste n'étant
+    souvent qu'un qualificatif de matière). 'piece'/'pièce' est volontairement exclu : dans '60
+    PIECES', ce n'est pas un récipient mais un simple compte. Renvoie None si aucun mot net ne
+    ressort."""
+    if not conditionnement:
+        return None
+    texte = motor.normalise_texte(conditionnement)
+    meilleure_position, meilleur_mot = None, None
+    for mot in _MOTS_CONTENANT_CANONIQUES:
+        if mot == "piece":
+            continue
+        m = re.search(rf"\b{re.escape(mot)}s?\b", texte)
+        if m and (meilleure_position is None or m.start() < meilleure_position):
+            meilleure_position, meilleur_mot = m.start(), mot
+    return meilleur_mot
 
 
 def _distance_un(a, b):
@@ -485,31 +660,160 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                                   prix_ref, prix_cmd, desig_fourn=None):
     conditionnement = nettoie_conditionnement(conditionnement)
 
+    # Unité de référence écrite directement comme "CONTENANT DE N" (ex: 'plateau de 60'),
+    # sans aucun poids — seul cas où l'unité de référence elle-même (pas le conditionnement)
+    # porte ce motif. Converti en 'PC' avec un prix de référence recalculé (par pièce
+    # individuelle), UNIQUEMENT si le prix de référence n'est pas déjà cohérent avec ce calcul
+    # — pour permettre la comparaison du prix à l'unité entre fournisseurs quel que soit le
+    # conditionnement (plateau de 60, caisse de 180...). Court-circuite le reste de la
+    # fonction : ce motif est trop spécifique pour interagir avec piece_carton_candidats, qui
+    # suppose que l'unité de référence est déjà 'PC'.
+    m_unite_seule = RE_CONTENANT_SEUL_SANS_POIDS.match(unite_ref) if unite_ref else None
+    if m_unite_seule and prix_ref and prix_cmd:
+        mot_contenant, n_texte = m_unite_seule.groups()
+        n = int(n_texte)
+        mot_contenant = motor.normalise_texte(mot_contenant)
+        prix_par_piece = round(prix_cmd / n, 4)
+        r = motor.Resultat()
+        r.nouveau_d = "PC"
+        r.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
+        r.commentaire_d = (
+            f"Unité de référence précisée en 'PC' (prix par pièce individuelle, comparable "
+            f"entre fournisseurs quel que soit le conditionnement) : l'unité de référence "
+            f"d'origine ('{unite_ref}') décrivait en fait le contenant de commande, pas une "
+            "unité de mesure.")
+        r.nouveau_l = mot_contenant.upper()
+        r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+        r.commentaire_l = (
+            f"Unité de commande précisée en '{mot_contenant.upper()}' (contenant de commande, "
+            "sans le décompte qui est maintenant implicite dans le prix par pièce).")
+        r.nouveau_f = n
+        r.commentaire_f = f"Renseigné à {n} : nombre de pièces dans ce '{mot_contenant}'."
+        r.contenant_imbrique_confirme = True  # pour valider l'unité de commande CORRIGÉE, pas l'ancienne
+        if round(prix_ref, 4) != prix_par_piece:
+            r.couleur_k = motor.COULEUR_RATIO_SUSPECT
+            r.nouveau_k = prix_par_piece
+            r.commentaire_k = (
+                f"Prix de référence par pièce suggéré : {prix_cmd} ÷ {n} = {prix_par_piece} "
+                f"(prix de référence actuel : {prix_ref}, qui ne semble pas divisé par le "
+                "nombre de pièces) — à vérifier, non modifié automatiquement.")
+        return r
+
     resultat_pieces = piece_carton_candidats(unite_ref, conditionnement)
     if resultat_pieces and prix_ref and prix_cmd:
-        candidats_pieces, mot_piece, poids_piece, base_unite = resultat_pieces
+        candidats_pieces, mot_piece, poids_piece, base_unite, mot_ext_imbrique, nb_pieces_internes = resultat_pieces
         ratio = prix_cmd / prix_ref
         r = motor.Resultat()
         total_pieces = candidats_pieces[-1]
         candidat_ok = next((c for c in candidats_pieces if abs(ratio - c) <= motor.TOLERANCE_RATIO * c), None)
 
-        # L'unité de référence est bien à la pièce ici (pas un poids à recalculer en kg/L) —
-        # toujours normaliser en 'PC', silencieusement si c'était déjà 'pc'/'pièce'/'unité'.
-        r.nouveau_d = "PC"
-        if motor.normalise_texte(unite_ref) != "pc":
-            r.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
-            r.commentaire_d = f"Unité de référence normalisée de '{unite_ref}' vers 'PC'."
+        # Le ratio ne confirme aucun nombre de pièces, mais le poids d'une pièce est connu —
+        # teste si le ratio correspond plutôt au POIDS TOTAL (total_pieces × poids d'une
+        # pièce) : le produit est alors vendu/comparé au poids, pas à la pièce (ex: miel en
+        # carton de 12 pots de 500g, prix déjà au kilo) — le prix de référence n'est PAS
+        # recalculé (même nombre, juste réinterprété en kg/L), seule l'unité change.
+        if candidat_ok is None and poids_piece and not mot_ext_imbrique:
+            poids_total = round(total_pieces * poids_piece, 6)
+            if poids_total > 0 and abs(ratio - poids_total) <= motor.TOLERANCE_RATIO * poids_total:
+                r2 = motor.Resultat()
+                r2.nouveau_d = base_unite.upper()
+                r2.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
+                r2.commentaire_d = (
+                    f"Unité de référence changée de '{unite_ref}' vers '{base_unite.upper()}' : "
+                    f"le ratio Prix commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = "
+                    f"{round(ratio, 3)}) ne correspond à aucun nombre de pièces, mais correspond "
+                    f"exactement au poids total du conditionnement ('{conditionnement}') : "
+                    f"{total_pieces} × {poids_piece} = {poids_total} {base_unite}. Le prix de "
+                    f"référence ({prix_ref}) n'est pas recalculé, juste réinterprété au "
+                    f"{base_unite}.")
+                return r2
 
-        if (candidat_ok is not None and candidat_ok == total_pieces and not mot_piece
+        if (mot_ext_imbrique and mot_piece not in ("piece", "pièce")
+                and candidat_ok is not None and candidat_ok == total_pieces):
+            # Contenant à double imbrication confirmé par le ratio des prix (ex: "CARTON DE 8
+            # PACKS DE 4 GOURDES DE 90 GR", 8 packs/carton confirmé ; ou "CARTON 6 BOUTEILLES DE
+            # 75 CL", 6 bouteilles confirmé) : la vraie unité de référence est le contenant
+            # intermédiaire/intérieur (pack, bouteille...), pas 'PC' générique — règle métier
+            # documentée dans useful_stuff/Exemples unités et prix 6.xlsx ("CAS 3"). Exclu
+            # quand le récipient intérieur n'est que 'piece'/'pièce' (compte générique, pas un
+            # vrai récipient, ex: 'CARTON 6 PIECES DE 300 GR') : D doit rester 'PC' générique,
+            # seul le récipient extérieur (mot_ext_imbrique) reste pertinent pour L, géré dans
+            # le 'else' ci-dessous.
+            # CONTENANT_ABREGE normalise les variantes connues (ex: 'bouteile', faute de frappe
+            # fréquente à un seul L) vers l'orthographe correcte — sans ça, une faute de frappe
+            # non corrigée en amont sur le Conditionnement se retrouverait écrite telle quelle.
+            mot_piece_novo = motor.CONTENANT_ABREGE.get(mot_piece, mot_piece.upper())
+            mot_ext_novo = motor.CONTENANT_ABREGE.get(mot_ext_imbrique, mot_ext_imbrique.upper())
+            r.nouveau_d = mot_piece_novo
+            r.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
+            r.commentaire_d = (
+                f"Unité de référence précisée en '{mot_piece_novo}' (contenant intermédiaire) "
+                f"plutôt que 'PC' générique : le conditionnement ('{conditionnement}') décrit un "
+                f"contenant à double niveau, et le ratio Prix commande ÷ Prix référence "
+                f"({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) confirme {total_pieces} "
+                f"{mot_piece}s par {mot_ext_imbrique}.")
+            r.nouveau_l = mot_ext_novo
+            r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+            r.commentaire_l = (
+                f"Unité de commande précisée en '{mot_ext_novo}' pour correspondre "
+                f"au contenant extérieur décrit dans le conditionnement ('{conditionnement}').")
+            r.contenant_imbrique_confirme = True
+            if nb_pieces_internes:
+                r.nouveau_f = nb_pieces_internes
+                r.commentaire_f = (
+                    f"Renseigné à {nb_pieces_internes} : nombre d'éléments individuels par "
+                    f"'{mot_piece}', d'après le conditionnement ('{conditionnement}').")
+        else:
+            # L'unité de référence est bien à la pièce ici (pas un poids à recalculer en
+            # kg/L) — toujours normaliser en 'PC', silencieusement si c'était déjà une variante
+            # de 'pc'/'piece'/'pièce'/'unite'/'unité' (simple nomenclature, pas un changement
+            # d'unité réel).
+            r.nouveau_d = "PC"
+            if motor.normalise_texte(unite_ref) not in ("pc", "piece", "pièce", "unite", "unité"):
+                r.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
+                r.commentaire_d = f"Unité de référence normalisée de '{unite_ref}' vers 'PC'."
+            if mot_ext_imbrique:
+                # Le ratio ne confirme pas le nombre de pièces intérieures, mais le récipient
+                # EXTÉRIEUR décrit dans le conditionnement reste fiable (texte explicite) —
+                # on le reprend quand même en unité de commande, que candidat_ok soit 1 (tout
+                # le contenant vendu en un seul morceau) ou ne corresponde à rien.
+                l_novo = motor.CONTENANT_ABREGE.get(mot_ext_imbrique, mot_ext_imbrique.upper())
+                if motor.normalise_texte(l_novo) != motor.normalise_texte(unite_cmd):
+                    r.nouveau_l = l_novo
+                    r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+                    r.commentaire_l = (
+                        f"Unité de commande changée en '{l_novo}' d'après le conditionnement "
+                        f"('{conditionnement}').")
+
+        if (candidat_ok is not None and candidat_ok == total_pieces
+                and mot_piece in (None, "lot")
                 and motor.normalise_texte(unite_cmd) != f"lot de {total_pieces}"):
-            # Aucun récipient nommé dans le conditionnement ('100 x 10g', '4 x 125g') — le
-            # ratio confirme bien un LOT de N pièces, pas un poids total à recalculer.
+            # Aucun récipient PHYSIQUE nommé dans le conditionnement — soit aucun mot du tout
+            # ('100 x 10g', '4 x 125g'), soit le marqueur 'lot' ('LOT DE 4 PIECES', qui ne
+            # désigne pas un récipient mais directement un lot) — le ratio confirme bien un
+            # LOT de N pièces, pas un poids total à recalculer.
             r.nouveau_l = f"LOT DE {total_pieces}"
             r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
             r.commentaire_l = (
                 f"Unité de commande précisée en 'LOT DE {total_pieces}' : le ratio Prix "
                 f"commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) "
                 f"correspond au conditionnement ('{conditionnement}'), sans récipient nommé.")
+        elif (mot_piece and mot_piece not in ("lot", "piece", "pièce") and not mot_ext_imbrique):
+            # Récipient nommé dans le conditionnement ('COLIS DE 15 PIECES' -> 'colis') : on le
+            # reprend dans l'unité de commande, QUE LE RATIO confirme ou non le nombre de
+            # pièces — le nom du récipient vient directement du texte (fiable), indépendamment
+            # de la cohérence du prix (qui reste signalée séparément si besoin). 'piece'/'pièce'
+            # est exclu : ce n'est pas un récipient réel (juste un compte générique, ex: 'CARTON
+            # 6 PIECES DE 300 GR' où RE_CONTENANT_IMBRIQUE renvoie 'piece' comme mot_piece faute
+            # de récipient intérieur nommé) — l'imposer en L écraserait à tort un vrai récipient
+            # déjà correct ('CARTON').
+            l_novo = motor.CONTENANT_ABREGE.get(mot_piece, mot_piece.upper())
+            if motor.normalise_texte(l_novo) != motor.normalise_texte(unite_cmd):
+                r.nouveau_l = l_novo
+                r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+                r.commentaire_l = (
+                    f"Unité de commande changée en '{l_novo}' d'après le conditionnement "
+                    f"('{conditionnement}').")
 
         if poids_piece and not poids_ref:
             # Le poids d'UNE pièce est écrit explicitement dans le conditionnement (ex: 'DE
@@ -518,17 +822,41 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
             # PAS le nombre total de pièces (ça reste une incohérence de prix/quantité à
             # signaler séparément, mais le poids d'une pièce, lui, n'est pas en cause).
             r.nouveau_e = poids_piece
+            unite_confirmation = f"{mot_piece}s" if mot_ext_imbrique else "pièces"
             confirmation = (
                 f"Confirmé par le ratio Prix commande ÷ Prix référence ({prix_cmd} ÷ "
-                f"{prix_ref} = {round(ratio, 3)}) qui correspond bien à {total_pieces} pièces."
+                f"{prix_ref} = {round(ratio, 3)}) qui correspond bien à {total_pieces} "
+                f"{unite_confirmation}."
                 if candidat_ok == total_pieces else
                 "Le nombre total de pièces n'est en revanche pas confirmé par le ratio des "
                 "prix — voir le signalement correspondant.")
+            if mot_ext_imbrique:
+                unite_designee = mot_piece
+                precision_quantite = f"(sur {total_pieces} {mot_piece}s par {mot_ext_imbrique})"
+            else:
+                unite_designee = "pièce"
+                precision_quantite = f"(sur {total_pieces} au total dans ce {mot_piece or 'conditionnement'})"
             r.explication_e = (
                 f"Poids à l'unité de référence renseigné à partir du conditionnement "
-                f"('{conditionnement}') : {poids_piece} {base_unite.upper()} par pièce "
-                f"(sur {total_pieces} au total dans ce {mot_piece or 'conditionnement'}). "
-                f"{confirmation}")
+                f"('{conditionnement}') : {poids_piece} {base_unite.upper()} par {unite_designee} "
+                f"{precision_quantite}. {confirmation}")
+        elif (mot_piece and candidat_ok == total_pieces and not poids_ref):
+            # Récipient nommé ('COLIS DE 32 PIECES', 'COFFRET DE 100 PIECES'...) ou marqueur
+            # 'lot' ('LOT DE N PIECES') ne donnant aucun poids — mais une fois le nombre de
+            # pièces confirmé par le ratio (donc la pièce elle-même bien identifiée), le poids
+            # unitaire se lit souvent dans la Désignation (fournisseur ou article), ex:
+            # '(125Gx4)x12', '(100Gx4x8)' -> 0.125/0.100 kg par pièce (seul le PREMIER poids
+            # trouvé compte : c'est celui d'une pièce, pas le poids total du contenant).
+            poids_trouve, base_trouvee = motor.extraire_quantite_designation(desig_fourn or "")
+            if not poids_trouve:
+                poids_trouve, base_trouvee = motor.extraire_quantite_designation(designation or "")
+            if poids_trouve and base_trouvee == "kg":
+                r.nouveau_e = round(poids_trouve, 3)
+                r.explication_e = (
+                    f"Poids à l'unité de référence renseigné à {round(poids_trouve, 3)} kg "
+                    f"d'après la désignation, confirmé par le ratio Prix commande ÷ Prix "
+                    f"référence ({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) qui correspond "
+                    f"bien à {total_pieces} pièces.")
 
         if candidat_ok is None:
             r.couleur_m = motor.COULEUR_RATIO_SUSPECT
@@ -539,12 +867,23 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                 f"{round(ratio, 3)}) ne correspond à aucun d'eux. À vérifier manuellement.")
         elif candidat_ok == 1 and candidat_ok != total_pieces:
             # Le ratio confirme que c'est le CONTENANT ENTIER (pas chacune de ses parts) qui
-            # est vendu (ex: 'PLAQUE DE 30 PIECES' = un gâteau entier coupé en 30 parts) — on
-            # cherche alors le poids de ce contenant dans la Désignation fournisseur ou la
-            # Désignation de l'article pour compléter E.
-            poids_trouve, base_trouvee = motor.extraire_quantite_designation(desig_fourn or "")
-            if not (poids_trouve and base_trouvee == "kg"):
-                poids_trouve, base_trouvee = motor.extraire_quantite_designation(designation or "")
+            # est vendu (ex: 'PLAQUE DE 30 PIECES' = un gâteau entier coupé en 30 parts, 'COLIS
+            # 30 G X100' = un colis de 100 pièces de 30 g). Si le poids d'UNE pièce est déjà
+            # connu depuis le conditionnement lui-même (poids_piece, ex: les '30 G' de 'COLIS 30
+            # G X100'), le poids total du contenant entier se déduit directement (poids_piece ×
+            # total_pieces) — bien plus fiable qu'une recherche en texte libre, qui confondrait
+            # ce poids PAR pièce avec le poids total recherché ici. On ne cherche dans la
+            # désignation qu'à défaut (ex: 'PLAQUE DE 30 PIECES', qui ne donne aucun poids).
+            if poids_piece:
+                poids_trouve, base_trouvee = round(poids_piece * total_pieces, 3), base_unite
+            else:
+                # On prend le DERNIER nombre trouvé, pas le premier : la désignation détaille
+                # parfois d'abord un poids PAR PIÈCE avant de donner le poids total (ex:
+                # '(100X15GR) 1.5 KG' — 15GR est le poids d'une galette, 1.5KG le poids des 100,
+                # celui qu'il faut ici puisque le prix est pour le tout).
+                poids_trouve, base_trouvee = extraire_dernier_poids_designation(desig_fourn or "")
+                if not (poids_trouve and base_trouvee == "kg"):
+                    poids_trouve, base_trouvee = extraire_dernier_poids_designation(designation or "")
             if poids_trouve and base_trouvee == "kg" and not poids_ref:
                 r.nouveau_e = round(poids_trouve, 3)
                 r.explication_e = (
@@ -554,14 +893,32 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                     f"{round(ratio, 3)}) confirme que le prix est pour le contenant ENTIER, pas "
                     "pour une part individuelle — poids trouvé dans la désignation.")
         elif candidat_ok != total_pieces:
-            r.couleur_d = motor.COULEUR_RATIO_SUSPECT
-            r.commentaire_d = (
-                f"L'unité de référence est déclarée à la pièce ('{unite_ref}'), mais le ratio "
-                f"observé ({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) correspond à "
-                f"{candidat_ok}, un SOUS-groupe du conditionnement ('{conditionnement}'), pas "
-                f"au nombre total de pièces ({total_pieces}). Le prix de référence semble être "
-                f"au prix du sous-lot de {candidat_ok}, pas à la pièce individuelle — à "
-                "vérifier.")
+            # Le ratio confirme un SOUS-groupe intermédiaire (ex: 'CARTON DE 12 X 36
+            # TRANCHES' : ratio = 12, le carton contient 12 paquets de 36 tranches chacun — le
+            # prix est pour UN paquet, pas pour une tranche ni pour le carton entier) : on
+            # cherche le poids de CE sous-groupe dans la désignation (premier nombre trouvé,
+            # comme pour le cas 'pièce individuelle' ci-dessus — pas de poids total en jeu ici)
+            # avant de se contenter de signaler l'incohérence.
+            poids_trouve, base_trouvee = motor.extraire_quantite_designation(desig_fourn or "")
+            if not (poids_trouve and base_trouvee == "kg"):
+                poids_trouve, base_trouvee = motor.extraire_quantite_designation(designation or "")
+            if poids_trouve and base_trouvee == "kg" and not poids_ref:
+                r.nouveau_e = round(poids_trouve, 3)
+                r.explication_e = (
+                    f"Poids à l'unité de référence renseigné à {round(poids_trouve, 3)} kg : le "
+                    f"ratio Prix commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = "
+                    f"{round(ratio, 3)}) correspond à {candidat_ok}, un sous-groupe du "
+                    f"conditionnement ('{conditionnement}') — poids trouvé dans la désignation "
+                    "pour ce sous-groupe.")
+            else:
+                r.couleur_d = motor.COULEUR_RATIO_SUSPECT
+                r.commentaire_d = (
+                    f"L'unité de référence est déclarée à la pièce ('{unite_ref}'), mais le "
+                    f"ratio observé ({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) correspond à "
+                    f"{candidat_ok}, un SOUS-groupe du conditionnement ('{conditionnement}'), "
+                    f"pas au nombre total de pièces ({total_pieces}). Le prix de référence "
+                    f"semble être au prix du sous-lot de {candidat_ok}, pas à la pièce "
+                    "individuelle — à vérifier.")
         return r  # cohérent (ou signalé ci-dessus) — le poids par pièce n'est pas utilisé
 
     # Unité de référence en kg/L (ou nommant elle-même un récipient, ex: 'seau', 'barquette')
@@ -618,6 +975,54 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                 ratio_prix = prix_cmd / prix_ref
                 tolerance_qte = max(0.05, 0.05 * quantite)
 
+                # Ratio ≈ 1 (prix de commande = prix de référence) avec une unité de référence
+                # à la pièce : confirmé à plusieurs reprises sur des fichiers réels (ex: 'PIECE
+                # DE 2KG', 'BARQUETTE DE 300G' dont le prix de référence et le prix de commande
+                # sont identiques) — le produit est vendu et payé à la pièce/au récipient entier,
+                # le conditionnement ne fait que PRÉCISER son poids, ce n'est pas un prix au
+                # poids à recalculer. On renseigne juste le poids (E) si absent, sans toucher
+                # K/L. Inclut aussi le cas où l'unité de référence d'ORIGINE est elle-même un
+                # mot de récipient (ex: D='Barquette', pas une valeur BPU valide) : même
+                # logique, sauf que D doit alors être corrigé vers 'PC' (couleur, car ce n'est
+                # plus une simple nomenclature équivalente).
+                if ((base_ref_norm_precoce in ("pc", "pièce", "piece", "unite", "unité")
+                     or base_ref_norm_precoce in _MOTS_CONTENANT_CONNUS)
+                        and abs(ratio_prix - 1) <= motor.TOLERANCE_RATIO):
+                    r = motor.Resultat()
+                    r.nouveau_d = "PC"
+                    if base_ref_norm_precoce not in ("pc", "pièce", "piece", "unite", "unité"):
+                        r.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
+                        r.commentaire_d = (
+                            f"Unité de référence changée de '{unite_ref}' vers 'PC' : le prix "
+                            f"de commande ({prix_cmd}) est égal au prix de référence "
+                            f"({prix_ref}), le produit est vendu à la pièce/au récipient entier "
+                            f"('{unite_ref}' n'est de toute façon pas une unité BPU valide).")
+                    # Normalise L vers le récipient nommé dans le conditionnement, si différent
+                    # — sinon les deux restent incohérents entre eux sans raison (ex: 'UNITE'/
+                    # 'PU' au lieu de 'PC'/'PIECE').
+                    if mot:
+                        l_novo = motor.CONTENANT_ABREGE.get(mot, mot.upper())
+                        if motor.normalise_texte(l_novo) != motor.normalise_texte(unite_cmd):
+                            r.nouveau_l = l_novo
+                            # Abréviation déjà reconnue du bon récipient (ex: 'BQT' pour
+                            # 'barquette') : uniformise en silence, pas une incohérence.
+                            abrege_reconnu = ABREVIATIONS_CONTENANT_RECONNUES.get(
+                                motor.normalise_texte(unite_cmd))
+                            if abrege_reconnu != mot:
+                                r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+                                r.commentaire_l = (
+                                    f"Unité de commande changée en '{l_novo}' d'après le "
+                                    f"conditionnement ('{conditionnement}').")
+                    if not poids_ref:
+                        r.nouveau_e = round(quantite, 3)
+                        r.explication_e = (
+                            f"Poids à l'unité de référence renseigné à {round(quantite, 3)} "
+                            f"{base} d'après le conditionnement ('{conditionnement}') : le prix "
+                            f"de commande ({prix_cmd}) est égal au prix de référence ({prix_ref}), "
+                            "le produit est donc vendu à la pièce/au récipient entier, pas au "
+                            f"{base}.")
+                    return r
+
                 # La "Désignation fournisseur" confirme parfois une AUTRE quantité que celle
                 # lue dans le Conditionnement (ex: Conditionnement 'PIECE DE 2,1 KG' saisi avec
                 # les chiffres inversés, alors que la Désignation fournisseur dit '...1,2KGx6...'
@@ -660,6 +1065,33 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                 if (ratio_entier != 0 and ratio_entier != 1
                         and abs(ratio_prix - ratio_entier) < 0.02
                         and abs(ratio_prix - quantite) > tolerance_qte):
+                    # Avant de se contenter de signaler : si le conditionnement est justement
+                    # écrit 'CONTENANT DE N X QTÉ UNITÉ' (ex: 'CARTON DE 9 X 500 GR') et que ce
+                    # N littéral correspond exactement au ratio entier observé, le prix n'est
+                    # pas incohérent — il est simplement donné par SOUS-paquet (ici 500 g), pas
+                    # au kilo : l'unité de référence devient 'PC', le poids d'un sous-paquet
+                    # (quantité totale ÷ N) renseigne E, et les prix restent intouchés (ils
+                    # étaient déjà corrects pour cette lecture-là).
+                    m_mult = (RE_CONTENANT_PUIS_MULT.match(conditionnement)
+                              or motor.RE_CONTENANT_MULTIPLIE.match(conditionnement))
+                    n_texte = None
+                    if m_mult:
+                        n_texte = int(m_mult.group(2) if m_mult.re is RE_CONTENANT_PUIS_MULT
+                                      else m_mult.group(1))
+                    if n_texte == ratio_entier:
+                        poids_sous_paquet = round(quantite / ratio_entier, 3)
+                        r.nouveau_d = "PC"
+                        r.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
+                        r.commentaire_d = (
+                            f"Unité de référence changée de '{unite_ref}' vers 'PC' : le "
+                            f"conditionnement ('{conditionnement}') décrit {ratio_entier} "
+                            f"sous-paquets de {poids_sous_paquet} {base} chacun, et le ratio "
+                            f"Prix commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = "
+                            f"{round(ratio_prix, 3)}) confirme que le prix de référence est déjà "
+                            "celui d'UN sous-paquet, pas du kilo. Prix inchangés.")
+                        if not poids_ref:
+                            r.nouveau_e = poids_sous_paquet
+                        return r
                     r.couleur_m = motor.COULEUR_RATIO_SUSPECT
                     r.commentaire_m = (
                         f"Le ratio Prix commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = "
@@ -679,13 +1111,27 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                 # (arrondis, centimes) — ne rien changer évite de déranger pour rien.
                 k_change = diff_relative > 0.05
                 l_novo = motor.CONTENANT_ABREGE.get(mot, mot.upper()) if mot else None
-                # Récipient d'exactement 1 kg/L, avec une unité de commande déjà 'KG'/'L' :
-                # les deux conventions (garder KG/L, ou préciser le récipient) sont aussi
-                # valables l'une que l'autre — ne pas forcer le changement.
-                if (l_novo and abs(quantite - 1) < 0.01
-                        and motor.normalise_texte(unite_cmd) in ("kg", "l", "litre")):
-                    l_novo = None
+                # Aucun récipient nommé ('6 x 1L'...), mais chaque unité fait exactement 1
+                # kg/L : comme pour les produits à la pièce, on précise "LOT DE N" plutôt que de
+                # laisser l'unité de commande telle quelle — confirmé sur fichiers réels (ex:
+                # lait vendu en 'LOT DE 6' bouteilles de 1L chacune).
+                if l_novo is None:
+                    m_double = motor.RE_DOUBLE.match(conditionnement)
+                    if m_double:
+                        n_unites, qte_unite, _unite_texte = m_double.groups()
+                        if abs(motor._nombre(qte_unite) - 1) < 0.01:
+                            l_novo = f"LOT DE {int(n_unites)}"
                 l_change = l_novo and motor.normalise_texte(l_novo) != motor.normalise_texte(unite_cmd)
+                l_change_silencieux = False
+                if l_change and mot:
+                    # L'unité de commande actuelle est déjà une abréviation reconnue du BON
+                    # récipient (ex: 'BQT' pour 'barquette') — pas une incohérence, juste une
+                    # autre façon d'écrire la même chose : on uniformise vers le mot en entier,
+                    # mais silencieusement (pas de couleur/commentaire pour une simple réécriture).
+                    abrege_reconnu = ABREVIATIONS_CONTENANT_RECONNUES.get(
+                        motor.normalise_texte(unite_cmd))
+                    if abrege_reconnu == mot:
+                        l_change_silencieux = True
 
                 r.nouveau_d = d_novo
                 if d_change:
@@ -697,21 +1143,21 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
 
                 if k_change:
                     r.nouveau_k = nouveau_k
-                    r.couleur_k = motor.COULEUR_UNITE_TRANSFORMEE
+                    r.couleur_k = motor.COULEUR_RATIO_SUSPECT
                     qte_affichee = round(quantite, 6) if quantite < 1 else round(quantite, 3)
                     r.commentaire_k = (
-                        f"Prix de référence recalculé : {prix_cmd} ÷ {qte_affichee} "
-                        f"{base} = {nouveau_k} (ancien prix de référence : {prix_ref}). Le "
+                        f"Prix de référence suggéré : {prix_cmd} ÷ {qte_affichee} "
+                        f"{base} = {nouveau_k} (prix de référence actuel : {prix_ref}). Le "
                         f"conditionnement ('{conditionnement}') indique {qte_affichee} {base} "
-                        f"pour ce récipient ; le prix de commande ({prix_cmd}) reste le prix "
-                        "réel, inchangé.")
+                        f"pour ce récipient — à vérifier, non modifié automatiquement.")
 
                 if l_change:
                     r.nouveau_l = l_novo
-                    r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
-                    r.commentaire_l = (
-                        f"Unité de commande changée en '{l_novo}' d'après le conditionnement "
-                        f"('{conditionnement}').")
+                    if not l_change_silencieux:
+                        r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+                        r.commentaire_l = (
+                            f"Unité de commande changée en '{l_novo}' d'après le conditionnement "
+                            f"('{conditionnement}').")
 
                 return r  # coherent ou signalé ci-dessus — D/K/L déjà tranchés ici
 
@@ -723,10 +1169,31 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
             texte = getattr(resultat, attribut)
             if texte:
                 setattr(resultat, attribut, texte.replace(f"'{alias}'", f"'{unite_ref}'"))
-    reconsidere_prix_inexplique(resultat, unite_ref, conditionnement, unite_cmd, prix_ref, prix_cmd)
+    reconsidere_prix_inexplique(resultat, unite_ref, conditionnement, unite_cmd, prix_ref, prix_cmd,
+                                 designation, desig_fourn)
     reconsidere_recipient_de_1_unite(resultat, unite_ref, unite_cmd, conditionnement)
     reconsidere_ratio_un_contre_contenant(resultat, unite_ref, unite_cmd, conditionnement, prix_ref, prix_cmd)
+    reconsidere_contenant_nombre_pieces(resultat, unite_ref, conditionnement)
     return resultat
+
+
+def reconsidere_contenant_nombre_pieces(resultat, unite_ref, conditionnement):
+    """Cas 'nombre de pièces' du moteur de base (ex: œufs, 'Colis de 60 pièces') : l'unité de
+    commande reprend telle quelle l'ancienne unité de référence ('Poche', 'Carton'...) au lieu
+    du récipient réellement nommé dans le conditionnement ('Colis'). Si le conditionnement
+    nomme clairement un récipient reconnu, on le préfère à ce texte recopié."""
+    if resultat.nouveau_d != "PC" or resultat.nouveau_l != unite_ref:
+        return
+    mot = mot_contenant_dans_conditionnement(conditionnement)
+    if not mot:
+        return
+    l_novo = motor.CONTENANT_ABREGE.get(mot, mot.upper())
+    if motor.normalise_texte(l_novo) == motor.normalise_texte(unite_ref):
+        return
+    resultat.nouveau_l = l_novo
+    resultat.commentaire_l = (
+        f"Unité de commande précisée en '{l_novo}' d'après le conditionnement "
+        f"('{conditionnement}'), plutôt que l'ancienne unité de référence ('{unite_ref}').")
 
 
 def reconsidere_ratio_un_contre_contenant(resultat, unite_ref, unite_cmd, conditionnement, prix_ref, prix_cmd):
@@ -756,14 +1223,60 @@ def reconsidere_ratio_un_contre_contenant(resultat, unite_ref, unite_cmd, condit
     # juste le prix) plutôt que de la remplacer par 'KG'/'L' au passage.
     annule_relabel = base_cmd is None or base_cmd == base_cible
 
-    for qty_str, unite_str in motor.RE_LIBRE.findall(conditionnement):
-        if motor.base_depuis_unite(unite_str) != ("kg" if base_cible == "kg" else "l"):
-            continue
+    # Calibre/poids approximatif ou variable d'une pièce à l'autre (ex: '110g environ',
+    # 'calibres 90 et 110g') : ne décrit pas une quantité totale, et quand l'unité de commande
+    # est déjà dans la même base que l'unité de référence, ratio ≈ 1 est justement le résultat
+    # ATTENDU (achat au poids) — rien à signaler, ce nombre ne doit pas être traité comme une
+    # quantité à multiplier.
+    if base_cmd == base_cible and RE_QUANTITE_APPROXIMATIVE.search(conditionnement):
+        return
+
+    # D'abord un multiplicateur explicite devant un mot de récipient en texte libre (ex: '4
+    # barquettes de 400g'), sinon un simple nombre + unité isolé.
+    candidats_libres = []
+    for n_str, qty_str, unite_str in RE_MULTIPLICATEUR_CONTENANT_LIBRE.findall(conditionnement):
         try:
-            quantite = motor._nombre(qty_str) * motor.FACTEUR_VERS_KG_OU_L[unite_str.lower()]
+            candidats_libres.append((
+                motor._nombre(qty_str) * motor.FACTEUR_VERS_KG_OU_L[unite_str.lower()] * int(n_str),
+                unite_str))
         except (KeyError, ValueError):
             continue
-        if quantite > 0 and abs(quantite - 1) > motor.TOLERANCE_RATIO:
+    if not candidats_libres:
+        for qty_str, unite_str in motor.RE_LIBRE.findall(conditionnement):
+            try:
+                candidats_libres.append((
+                    motor._nombre(qty_str) * motor.FACTEUR_VERS_KG_OU_L[unite_str.lower()],
+                    unite_str))
+            except (KeyError, ValueError):
+                continue
+
+    candidats_pertinents = [
+        quantite for quantite, unite_str in candidats_libres
+        if motor.base_depuis_unite(unite_str) == ("kg" if base_cible == "kg" else "l") and quantite > 0]
+
+    # Si au moins un nombre du texte CONFIRME déjà le ratio (ex: 'SACHET DE 1 KG, PIECE DE 120
+    # GR' — le '1 KG' confirme, le '120 GR' n'est qu'un détail par pièce qu'il ne faut pas
+    # traiter comme une quantité totale contredisant le premier) : rien à signaler. On en
+    # profite pour préciser l'unité de commande avec le récipient nommé dans le texte (même
+    # recherche que reconsidere_contenant_nombre_pieces, insensible aux virgules), si elle
+    # n'était encore qu'un simple rappel de la base kg/L.
+    if any(abs(quantite - 1) <= motor.TOLERANCE_RATIO for quantite in candidats_pertinents):
+        if base_cmd == base_cible:
+            mot = mot_contenant_dans_conditionnement(conditionnement)
+            if mot:
+                l_novo = motor.CONTENANT_ABREGE.get(mot, mot.upper())
+                if motor.normalise_texte(l_novo) != motor.normalise_texte(unite_cmd):
+                    resultat.nouveau_l = l_novo
+                    resultat.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+                    resultat.commentaire_l = (
+                        f"Unité de commande précisée en '{l_novo}' d'après le conditionnement "
+                        f"('{conditionnement}').")
+        return
+
+    # Aucun nombre ne confirme le ratio : on signale avec le PREMIER trouvé (comportement
+    # d'origine, inchangé).
+    for quantite in candidats_pertinents:
+        if abs(quantite - 1) > motor.TOLERANCE_RATIO:
             if annule_relabel:
                 resultat.nouveau_l = None
                 resultat.couleur_l = None
@@ -815,60 +1328,207 @@ def reconsidere_recipient_de_1_unite(resultat, unite_ref, unite_cmd, conditionne
 
 
 RE_CONTENANT_PIECES_SEULEMENT = re.compile(
-    rf"^\s*({_MOTS_REGEX})s?\s+(?:de\s+)?(\d+)\s*pi[eè]ces?\s*$", re.I)
+    rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?(\d+)\s*{_MOT_COMPTAGE_FINAL}\s*$", re.I)
+
+# "LOT DE N PIECES" (ex: yaourts vendus en lot de 2/4/6/8) : même logique que ci-dessus, mais
+# "lot" n'est volontairement PAS un récipient physique (pas dans _MOTS_REGEX) — c'est un
+# simple marqueur de comptage, jamais un nom à reprendre tel quel dans l'unité de commande
+# (voir le marqueur spécial 'lot' dans piece_carton_candidats()).
+RE_LOT_PIECES_SEULEMENT = re.compile(r"^\s*lots?\s+(?:de\s+)?(\d+)\s*pi[eè]ces?\s*$", re.I)
+
+# Multiplicateur explicite devant un mot de récipient, n'importe où dans un texte libre non
+# structuré (ex: 'sous-atmosphère - 4 barquettes de 400g') — contrairement aux motifs stricts
+# ci-dessus (ancrés en ^...$), celui-ci sert à la recherche de dernier recours dans
+# reconsidere_prix_inexplique(), sur du texte qui ne respecte aucun format propre.
+RE_MULTIPLICATEUR_CONTENANT_LIBRE = re.compile(
+    rf"(\d+)\s*(?:{_MOTS_REGEX})s?\s+de\s+([\d,.]+)\s*({_UNITES_REGEX})", re.I)
+
+# Fourchette de poids/volume (ex: 'PIECE DE 1,5 A 2,5 KG', '1-3KG') — poids variable d'une
+# pièce à l'autre, précisé par une plage plutôt qu'un nombre unique.
+RE_PLAGE_LIBRE = re.compile(rf"([\d,.]+)\s*(?:[aà]|-)\s*([\d,.]+)\s*({_UNITES_REGEX})\b", re.I)
+
+# Calibre/poids approximatif ou variable d'une pièce à l'autre (ex: '110g environ', '100g et
+# plus', 'calibres 90 et 110g') — décrit la taille indicative d'UNE pièce, pas une quantité
+# totale à multiplier (voir reconsidere_prix_inexplique).
+RE_QUANTITE_APPROXIMATIVE = re.compile(r"\benviron\b|\bet\s+plus\b|^\s*calibres?\b", re.I)
 
 
-def reconsidere_prix_inexplique(resultat, unite_ref, conditionnement, unite_cmd, prix_ref, prix_cmd):
+def _cherche_candidats_quantite_libre(texte, base_cible):
+    """Cherche, dans un texte libre (Conditionnement OU Désignation), toute quantité
+    exploitable dans la base visée (kg/L) : d'abord une fourchette ('1,5 A 2,5 KG'), puis un
+    multiplicateur devant un mot de récipient ('4 barquettes de 400g'), puis un simple nombre
+    + unité isolé. Renvoie (candidats, plage) où 'plage' est (basse, haute) si une fourchette a
+    été trouvée (sinon None) et 'candidats' la liste des quantités uniques trouvées."""
+    if not texte:
+        return [], None
+    m_plage = RE_PLAGE_LIBRE.search(texte)
+    if m_plage:
+        borne_basse, borne_haute, unite_str = m_plage.groups()
+        if motor.base_depuis_unite(unite_str) == ("kg" if base_cible == "kg" else "l"):
+            try:
+                facteur = motor.FACTEUR_VERS_KG_OU_L[unite_str.lower()]
+                basse = motor._nombre(borne_basse) * facteur
+                haute = motor._nombre(borne_haute) * facteur
+                return [], (min(basse, haute), max(basse, haute))
+            except (KeyError, ValueError):
+                pass
+
+    candidats = []
+    for n_str, qty_str, unite_str in RE_MULTIPLICATEUR_CONTENANT_LIBRE.findall(texte):
+        if motor.base_depuis_unite(unite_str) != ("kg" if base_cible == "kg" else "l"):
+            continue
+        try:
+            candidats.append(motor._nombre(qty_str) * motor.FACTEUR_VERS_KG_OU_L[unite_str.lower()]
+                              * int(n_str))
+        except (KeyError, ValueError):
+            continue
+    if not candidats:
+        for qty_str, unite_str in motor.RE_LIBRE.findall(texte):
+            if motor.base_depuis_unite(unite_str) != ("kg" if base_cible == "kg" else "l"):
+                continue
+            try:
+                candidats.append(motor._nombre(qty_str) * motor.FACTEUR_VERS_KG_OU_L[unite_str.lower()])
+            except (KeyError, ValueError):
+                continue
+    return [c for c in candidats if c > 0], None
+
+
+def reconsidere_prix_inexplique(resultat, unite_ref, conditionnement, unite_cmd, prix_ref,
+                                 prix_cmd, designation=None, desig_fourn=None):
     """Quand le BPU est au kg/L et que rien dans le conditionnement n'a pu expliquer le
-    ratio Prix commande ÷ BPU via les motifs reconnus, deux cas différents :
+    ratio Prix commande ÷ BPU via les motifs reconnus, plusieurs cas différents :
     1. Le conditionnement ne donne qu'un NOMBRE DE PIÈCES sans poids ('CAGEOT DE 6 PIECES')
        et la commande se fait dans ce même récipient : le poids réel est inconnu (souvent
        variable) — impossible de vérifier, donc pas d'incohérence à signaler.
-    2. Un mot ou code non reconnu casse le motif ('SAC KRAFT DE 5 KG') — on cherche quand
-       même, en texte libre, un nombre suivi d'une unité n'importe où dans le
-       Conditionnement, et si ce nombre correspond au ratio observé, ce n'est pas non plus
-       une incohérence, juste un format non standard."""
+    2. Un mot ou code non reconnu casse le motif ('SAC KRAFT DE 5 KG'), ou la quantité n'est
+       écrite que dans la Désignation (de l'article ou du fournisseur), pas le Conditionnement
+       ('SEAU CONSIGNÉ' + désignation '... SEAU 5L') — on cherche quand même, en texte libre,
+       une quantité qui explique le ratio observé.
+    3. Rien nulle part (ni Conditionnement ni Désignation) ne permet de vérifier quoi que ce
+       soit — impossible de confirmer OU d'infirmer, donc pas d'incohérence à signaler non
+       plus (juste un signalement vague ne ferait qu'ajouter du bruit sans aide réelle)."""
     if resultat.couleur_m != motor.COULEUR_PRIX_INEXPLIQUE:
         return
     base_cible = motor.normalise_texte(unite_ref)
-    if base_cible not in ("kg", "l", "litre") or not conditionnement or not prix_ref:
+    if base_cible not in ("kg", "l", "litre") or not prix_ref:
         return
 
-    m = RE_CONTENANT_PIECES_SEULEMENT.match(conditionnement)
+    m = RE_CONTENANT_PIECES_SEULEMENT.match(conditionnement or "")
     if m and unite_cmd and motor.normalise_texte(unite_cmd) == motor.normalise_texte(m.group(1)):
         resultat.couleur_m = None
         resultat.commentaire_m = None
         return
 
     ratio_observe = prix_cmd / prix_ref
-    candidats_trouves = []
-    for qty_str, unite_str in motor.RE_LIBRE.findall(conditionnement):
-        if motor.base_depuis_unite(unite_str) != ("kg" if base_cible == "kg" else "l"):
-            continue
-        try:
-            valeur_kg = motor._nombre(qty_str) * motor.FACTEUR_VERS_KG_OU_L[unite_str.lower()]
-        except (KeyError, ValueError):
-            continue
-        if valeur_kg <= 0:
-            continue
-        candidats_trouves.append(valeur_kg)
-        if abs(ratio_observe - valeur_kg) <= motor.TOLERANCE_RATIO * valeur_kg:
-            resultat.couleur_m = None
-            resultat.commentaire_m = None
+
+    # Calibre/poids APPROXIMATIF ou variable d'une pièce à l'autre (ex: '110g environ',
+    # '120-130g environ', '100g et plus', 'calibres 90 et 110g') : ce nombre décrit la taille
+    # indicative d'UNE pièce/filet (poisson...), pas une quantité totale à multiplier — la
+    # recherche libre ci-dessous s'y tromperait (elle traiterait '110g environ' comme si
+    # c'était la quantité totale du conditionnement). Quand l'unité de commande est déjà dans
+    # la MÊME base que l'unité de référence (les deux en kg, ou les deux en L), le prix devrait
+    # être identique des deux côtés (achat au poids, peu importe la taille exacte de la pièce) —
+    # ratio attendu = 1, sinon incohérence claire de prix/unité, sans rapport avec ce calibre.
+    if conditionnement and RE_QUANTITE_APPROXIMATIVE.search(conditionnement):
+        base_cmd = motor.normalise_texte(unite_cmd) if unite_cmd else None
+        base_cmd = "kg" if base_cmd == "kg" else ("l" if base_cmd in ("l", "litre") else None)
+        if base_cmd == base_cible:
+            if abs(ratio_observe - 1) <= motor.TOLERANCE_RATIO:
+                resultat.couleur_m = None
+                resultat.commentaire_m = None
+            else:
+                resultat.commentaire_m = (
+                    f"Le conditionnement ('{conditionnement}') ne donne qu'un calibre/poids "
+                    f"approximatif (pas une quantité à multiplier) : l'unité de référence et "
+                    f"l'unité de commande sont toutes les deux en {base_cible}, donc le prix "
+                    f"devrait être identique des deux côtés, mais le prix de référence "
+                    f"({prix_ref}) et le prix de commande ({prix_cmd}) diffèrent (ratio = "
+                    f"{round(ratio_observe, 3)}). Incohérence de prix/unité à vérifier "
+                    "manuellement.")
             return
 
-    if candidats_trouves:
-        # Le conditionnement suggère bien une quantité (ex: 'SAC KRAFT DE 5 KG' -> 5), mais le
-        # ratio observé ne correspond à AUCUNE d'elles — trop incertain pour recalculer
-        # automatiquement (le motif n'est pas propre), mais le message pointe directement le
-        # problème : un des deux prix semble faux, pas juste "pas d'explication".
-        quantite = candidats_trouves[0]
-        resultat.commentaire_m = (
-            f"Le conditionnement ('{conditionnement}') suggère {round(quantite, 3)} {base_cible} "
-            f"— dans ce cas le prix de commande devrait valoir {round(quantite, 3)} fois le prix "
-            f"de référence, soit {round(prix_ref * quantite, 4)}, mais il vaut {prix_cmd} (ratio "
-            f"observé = {round(ratio_observe, 3)}). Un des deux prix semble incorrect — à "
-            "vérifier manuellement (pas recalculé automatiquement, le format n'est pas standard).")
+    texte_designation = " ".join(t for t in (designation, desig_fourn) if t)
+
+    for source, texte in (("Conditionnement", conditionnement), ("Désignation", texte_designation)):
+        candidats, plage = _cherche_candidats_quantite_libre(texte, base_cible)
+        if plage:
+            if plage[0] <= ratio_observe <= plage[1]:
+                resultat.couleur_m = None
+                resultat.commentaire_m = None
+                return
+            continue
+        for valeur_kg in candidats:
+            if abs(ratio_observe - valeur_kg) <= motor.TOLERANCE_RATIO * valeur_kg:
+                resultat.couleur_m = None
+                resultat.commentaire_m = None
+                return
+        if candidats:
+            # Une quantité est bien trouvée (dans le Conditionnement ou la Désignation), mais
+            # le ratio observé ne correspond à aucune d'elles — trop incertain pour recalculer
+            # automatiquement, mais le message pointe directement le problème : un des deux
+            # prix semble faux, pas juste "pas d'explication".
+            quantite = candidats[0]
+            resultat.commentaire_m = (
+                f"Le {source.lower()} ('{texte}') suggère {round(quantite, 3)} {base_cible} "
+                f"— dans ce cas le prix de commande devrait valoir {round(quantite, 3)} fois le "
+                f"prix de référence, soit {round(prix_ref * quantite, 4)}, mais il vaut "
+                f"{prix_cmd} (ratio observé = {round(ratio_observe, 3)}). Un des deux prix "
+                "semble incorrect — à vérifier manuellement (pas recalculé automatiquement, le "
+                "format n'est pas standard).")
+            return
+
+    # Rien trouvé nulle part pour vérifier quoi que ce soit — un signalement vague n'aiderait
+    # pas, on reste silencieux plutôt que d'ajouter du bruit.
+    resultat.couleur_m = None
+    resultat.commentaire_m = None
+
+
+# ============================================================================
+# ORIGINE — contrairement à pretraitement.py (qui corrige automatiquement une valeur non
+# reconnue en 'France'), l'audit ne modifie JAMAIS la valeur : seulement un signalement, à
+# charge d'une personne de corriger. Liste de pays volontairement plus large que celle de
+# pretraitement.py (observée directement dans les fichiers de référence).
+# ============================================================================
+ORIGINES_LARGES = {"france", "ue", "union europeenne", "hors ue", "hors union europeenne", "monde"}
+PAYS_ORIGINE_CONNUS = {
+    "espagne", "italie", "belgique", "chine", "royaume-uni", "royaume uni", "chili", "perou",
+    "irlande", "egypte", "asie", "allemagne", "portugal", "pays-bas", "maroc", "pologne",
+    "canada", "costa rica", "inde", "malaisie", "norvege", "bangladesh", "bresil", "usa",
+    "etats-unis", "nouvelle zelande", "islande", "grece",
+}
+
+
+# BIO/Label détectés depuis la Désignation quand mentionnés explicitement (voir
+# audite_fournisseur) — vocabulaire volontairement restreint à des mentions non ambiguës.
+# Négation ('NON BIO', 'SANS BIO') explicitement exclue pour ne pas marquer l'inverse.
+RE_BIO_DETECTE = re.compile(r"\bbio(?:logique)?\b", re.I)
+RE_BIO_NEGATION = re.compile(r"\b(?:non|sans)[\s-]+bio(?:logique)?\b", re.I)
+RE_LABEL_DETECTE = re.compile(r"\blabel\s+rouge\b|\baop\b|\baoc\b|\bigp\b|\bstg\b", re.I)
+
+
+def _normalise_origine(valeur):
+    texte = re.sub(r"\(.*?\)", "", str(valeur)).strip().lower()  # retire qualificatif entre parenthèses, ex: "France (79)"
+    texte = "".join(c for c in unicodedata.normalize("NFD", texte) if unicodedata.category(c) != "Mn")
+    return re.sub(r"\s+", " ", texte).strip()
+
+
+def verifie_origine(valeur):
+    """Vérifie qu'Origine est soit une des 4 grandes catégories (France/UE/Hors UE/Monde),
+    soit un seul pays reconnu. Renvoie (True, None) si reconnu/vide, (False, message) sinon —
+    ne modifie jamais la valeur, juste un signalement."""
+    if not valeur:
+        return True, None  # vide : optionnelle (cf. format_cible.md), pas le rôle de cette règle
+    norm = _normalise_origine(valeur)
+    if norm in ORIGINES_LARGES or norm in PAYS_ORIGINE_CONNUS:
+        return True, None
+    if any(sep in norm for sep in (",", "/")):
+        return False, (
+            f"Origine ('{valeur}') semble combiner plusieurs valeurs — préciser laquelle "
+            "s'applique réellement à ce produit (une seule valeur attendue).")
+    return False, (
+        f"Origine ('{valeur}') non reconnue : ni une des 4 catégories (France, UE, Hors UE, "
+        "Monde), ni un pays de la liste connue — vérifier l'orthographe, ou que ce pays existe "
+        "bien (liste à élargir si besoin).")
 
 
 def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
@@ -892,10 +1552,20 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
         return True, None
     if re.match(r"^\d+\s*pi[eè]ces?$", cat):
         return True, None
+    m_lot = re.match(r"^lot de (\d+)$", cat)
+    if m_lot:
+        n = int(m_lot.group(1))
+        # Le nombre N n'est pas toujours écrit tel quel (ex: '12 x 4 x 100g' pour un lot de 48 :
+        # 48 = 12 × 4, jamais écrit littéralement) — on accepte aussi le produit de deux
+        # nombres présents dans le conditionnement.
+        nombres = [int(x) for x in re.findall(r"\d+", cond)]
+        if n in nombres or any(a * b == n for i, a in enumerate(nombres) for b in nombres[i + 1:]):
+            return True, None
 
     mots_types = ["sac", "pièce", "piece", "seau", "brique", "barquette", "barq", "bidon",
                   "outre", "colis", "pot", "sachet", "carton", "poche", "bouteille", "bouteile",
-                  "cageot", "boite", "filet", "caisse", "plaque", "plateau", "clayette"]
+                  "cageot", "boite", "boîte", "filet", "caisse", "plaque", "plateau", "clayette",
+                  "bac", "coffret", "plaquette", "paquet", "etui", "étui", "bombe"]
     trouve = [m for m in mots_types if m in texte_combine]
     if not trouve:
         return True, None
@@ -905,7 +1575,7 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
         return True, None
     if cat == "pc" and any(m in ("pièce", "piece", "pot", "sachet") for m in trouve):
         return True, None
-    if cat == "barquette" and "barquette" in trouve:
+    if cat == "barquette" and any(m in ("barquette", "barq") for m in trouve):
         return True, None
     if cat == "sac" and "sac" in trouve:
         return True, None
@@ -922,7 +1592,7 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
         trouve_corrige = [m for m in mots_types if m in f"{cond_corrige} {desig}"]
         if cat_singulier in trouve_corrige or (cat == "pc" and any(
                 m in ("pièce", "piece", "pot", "sachet") for m in trouve_corrige)) or (
-                cat == "barquette" and "barquette" in trouve_corrige) or (
+                cat == "barquette" and any(m in ("barquette", "barq") for m in trouve_corrige)) or (
                 cat == "sac" and "sac" in trouve_corrige) or (cat == "bouteille" and any(
                 m in ("bouteille", "brique") for m in trouve_corrige)):
             return True, None
@@ -963,7 +1633,7 @@ def localise_feuille_et_colonnes(ws):
     if ligne_entete is None:
         return None
 
-    col_marche = col_lot = col_designation = col_unite_ref = col_poids_ref = None
+    col_marche = col_lot = col_designation = col_unite_ref = col_poids_ref = col_nb_pieces = None
     fournisseurs_col = []  # [(numero, colonne_du_label_fournisseur)]
     for c in range(1, ws.max_column + 1):
         texte = _normalise_entete(ws.cell(row=ligne_entete, column=c).value)
@@ -973,9 +1643,20 @@ def localise_feuille_et_colonnes(ws):
             col_lot = c
         elif "désignation de l'article" in texte:
             col_designation = c
-        elif "poids à l'unité de référence" in texte:
+        elif texte.startswith("poids"):
+            # Match par préfixe (pas juste "poids à l'unité de référence" en substring) :
+            # certains fichiers (ex: Base IANOR AGAPE 16) utilisent un texte différent ("Poids
+            # de la PC (si Unité de référence = PC)") qui contient lui-même la phrase "unité de
+            # référence" entre parenthèses — une recherche en substring sur "unité de
+            # référence" matchait alors À TORT cette colonne Poids comme étant la colonne
+            # Unité de référence (jamais la bonne colonne 4, toujours vide ensuite).
             col_poids_ref = c
-        elif "unité de référence" in texte:
+        elif "nombre de" in texte and "pièces" in texte:
+            col_nb_pieces = c
+        elif texte.startswith("unité") and "référence" in texte:
+            # Préfixe "unité" (pas substring "unité de référence") pour couvrir aussi le texte
+            # "Unité Référence (BPU)..." (sans "de") observé dans Base IANOR AGAPE 16, sans
+            # jamais matcher la colonne Poids ci-dessus (qui commence par "poids", pas "unité").
             col_unite_ref = c
         else:
             m = re.match(r"fournisseur\s*(\d+)", texte)
@@ -986,11 +1667,27 @@ def localise_feuille_et_colonnes(ws):
         return None
 
     fournisseurs = []
+    cols_fournisseur_triees = sorted(c for _, c in fournisseurs_col)
     for numero, col in sorted(fournisseurs_col):
+        # Origine n'est pas à un décalage fixe par rapport au bloc : le bloc Fournisseur 3 n'a
+        # pas de colonne "Circuit court", ce qui décale toutes les colonnes suivantes d'une
+        # position par rapport aux blocs 1/2 — on la retrouve donc par son texte d'en-tête,
+        # cherchée seulement dans la plage de colonnes de CE bloc (jusqu'au bloc suivant).
+        prochaine_col = next((c2 for c2 in cols_fournisseur_triees if c2 > col), ws.max_column + 1)
+        col_origine = col_bio = col_label = None
+        for c2 in range(col + 1, prochaine_col):
+            texte_c2 = _normalise_entete(ws.cell(row=ligne_entete, column=c2).value)
+            if texte_c2 == "origine":
+                col_origine = c2
+            elif texte_c2.startswith("bio"):
+                col_bio = c2
+            elif texte_c2.startswith("label"):
+                col_label = c2
         fournisseurs.append({
             "nom": f"Fournisseur {numero}",
             "cond": col + 1, "desig_fourn": col + 2, "ref": col + 3,
             "prix_ref": col + 4, "unite_cmd": col + 5, "prix_cmd": col + 6,
+            "origine": col_origine, "bio": col_bio, "label": col_label,
         })
 
     derniere_colonne_cle = max(f["prix_cmd"] for f in fournisseurs) + 6  # marge (Local/Bio/.../Indice I0)
@@ -1002,6 +1699,7 @@ def localise_feuille_et_colonnes(ws):
         "col_designation": col_designation,
         "col_unite_ref": col_unite_ref,
         "col_poids_ref": col_poids_ref,
+        "col_nb_pieces": col_nb_pieces,
         "fournisseurs": fournisseurs,
         "derniere_colonne_cle_doublon": derniere_colonne_cle,
     }
@@ -1218,7 +1916,7 @@ def applique_defaut_legume(resultat, lot_valor, designation, conditionnement, un
 
 
 def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref, fournisseur,
-                        col_poids_ref, lot_valor=None, indice_prix=None):
+                        col_poids_ref, lot_valor=None, indice_prix=None, col_nb_pieces=None):
     conditionnement = ws_valeurs.cell(row=ligne, column=fournisseur["cond"]).value
     desig_fourn = ws_valeurs.cell(row=ligne, column=fournisseur["desig_fourn"]).value
     reference = ws_valeurs.cell(row=ligne, column=fournisseur["ref"]).value
@@ -1226,10 +1924,47 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
     prix_ref = ws_valeurs.cell(row=ligne, column=fournisseur["prix_ref"]).value
     prix_cmd = ws_valeurs.cell(row=ligne, column=fournisseur["prix_cmd"]).value
 
-    if reference is None and conditionnement is None and prix_ref is None and prix_cmd is None:
-        return 0  # ce fournisseur n'est simplement pas renseigné pour cette ligne
+    # Un prix écrit en texte (ex: '104.5' saisi comme chaîne, pas comme nombre) fait planter
+    # tous les calculs (prix_cmd / prix_ref) plus loin — on tente de le convertir, et si ce
+    # n'est vraiment pas un nombre, on le signale au lieu de planter.
+    total_prix_texte = 0
+    for champ, valeur in (("prix_ref", prix_ref), ("prix_cmd", prix_cmd)):
+        if isinstance(valeur, str):
+            try:
+                convertie = motor._nombre(valeur)
+            except ValueError:
+                marque(ws.cell(row=ligne, column=fournisseur[champ]), motor.COULEUR_A_VERIFIER,
+                       fournisseur["nom"],
+                       f"Valeur ('{valeur}') écrite en texte et pas reconnue comme un nombre.")
+                total_prix_texte += 1
+                convertie = None
+            if champ == "prix_ref":
+                prix_ref = convertie
+            else:
+                prix_cmd = convertie
 
-    total = 0
+    if reference is None and conditionnement is None and prix_ref is None and prix_cmd is None:
+        return total_prix_texte  # ce fournisseur n'est simplement pas renseigné pour cette ligne
+
+    total = total_prix_texte
+
+    # Produit vendu au poids sans conditionnement fixe (CAS 2 documenté par le métier dans
+    # useful_stuff/Exemples unités et prix 6.xlsx — viandes/poissons/fromages/fruits et
+    # légumes) : Conditionnement vide, Unité de référence = Unité de commande (KG ou L), et
+    # prix de référence = prix de commande (aucune conversion nécessaire) — ce n'est pas une
+    # donnée manquante, juste l'absence de récipient fixe. Rempli à 'VRAC' pour le distinguer
+    # d'une vraie case vide (qui, elle, reste un problème potentiel à vérifier manuellement).
+    if (not conditionnement and prix_ref is not None and prix_cmd is not None
+            and unite_ref and motor.normalise_texte(unite_ref) in ("kg", "l", "litre")
+            and unite_cmd and motor.normalise_texte(unite_cmd) == motor.normalise_texte(unite_ref)
+            and prix_ref == prix_cmd):
+        cel_cond = ws.cell(row=ligne, column=fournisseur["cond"])
+        cel_cond.value = "VRAC"
+        cel_cond.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
+                                     end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+        # Pas de commentaire : la couleur seule suffit (cellule vide remplie automatiquement).
+        total += 1
+        conditionnement = "VRAC"
 
     # Référence de plage de cellules Excel ('H33:H66') collée par erreur au milieu du
     # Conditionnement : aucune ambiguïté possible (ce n'est jamais du texte produit légitime),
@@ -1268,15 +2003,19 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                 ws.cell(row=ligne, column=fournisseur["cond"]).value = conditionnement_corrige
                 conditionnement = conditionnement_corrige
 
+    # Cellule vide : la couleur seule suffit, pas de commentaire (allège le fichier).
     if prix_ref is None:
-        marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]), motor.COULEUR_A_VERIFIER,
-               fournisseur["nom"], "Prix de référence manquant.")
+        cel = ws.cell(row=ligne, column=fournisseur["prix_ref"])
+        cel.fill = PatternFill(start_color=motor.COULEUR_A_VERIFIER,
+                                end_color=motor.COULEUR_A_VERIFIER, fill_type="solid")
         total += 1
     if prix_cmd is None:
-        marque(ws.cell(row=ligne, column=fournisseur["prix_cmd"]), motor.COULEUR_A_VERIFIER,
-               fournisseur["nom"], "Prix de commande manquant.")
+        cel = ws.cell(row=ligne, column=fournisseur["prix_cmd"])
+        cel.fill = PatternFill(start_color=motor.COULEUR_A_VERIFIER,
+                                end_color=motor.COULEUR_A_VERIFIER, fill_type="solid")
         total += 1
 
+    resultat = None
     if unite_ref and prix_ref is not None and prix_cmd is not None:
         resultat = traite_ligne_etendue(unite_ref, poids_ref, designation, conditionnement,
                                          unite_cmd, prix_ref, prix_cmd, desig_fourn)
@@ -1291,8 +2030,11 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                    fournisseur["nom"], texte_cond)
             total += 1
 
-        reconsidere_recalcul_k_vs_indice_prix(resultat, indice_prix, designation, lot_valor,
-                                               prix_ref, prix_cmd)
+        # Comparaison du prix à la médiane des autres lignes/catégories désactivée à la
+        # demande — seule la cohérence interne de la ligne (unité/prix/conditionnement) reste
+        # vérifiée.
+        # reconsidere_recalcul_k_vs_indice_prix(resultat, indice_prix, designation, lot_valor,
+        #                                        prix_ref, prix_cmd)
 
         d_final = resultat.nouveau_d if resultat.nouveau_d is not None else unite_ref
         base_final_d = motor.normalise_texte(d_final) if d_final else None
@@ -1325,8 +2067,20 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                     cel_e.value = resultat.nouveau_e
                     cel_e.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
                                               end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
-                    cel_e.comment = Comment(f"[{fournisseur['nom']}] {explication_e}", AUTEUR_COMMENTAIRE)
+                    # Pas de commentaire ici (juste la couleur) : la couleur seule suffit à
+                    # signaler que la case a été remplie, un commentaire par ligne alourdit le
+                    # fichier pour rien.
                     total += 1
+
+        nouveau_f = getattr(resultat, "nouveau_f", None)
+        if col_nb_pieces and nouveau_f is not None:
+            cel_f = ws.cell(row=ligne, column=col_nb_pieces)
+            if cel_f.value is None:
+                cel_f.value = nouveau_f
+                cel_f.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
+                                          end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+                # Pas de commentaire : la couleur seule suffit (allège le fichier).
+                total += 1
 
         d_differe = (resultat.nouveau_d is not None
                      and motor.normalise_texte(resultat.nouveau_d) != motor.normalise_texte(unite_ref))
@@ -1335,11 +2089,16 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
         k_differe = (resultat.nouveau_k is not None
                      and abs(resultat.nouveau_k - prix_ref) > 0.0005)
 
-        # Écrit toujours la valeur normalisée (D en KG/L/PC, L quand il est fiable, K quand
-        # recalculé) — même une simple normalisation silencieuse (kg -> KG) est appliquée.
-        # Seule la mise en évidence (couleur + commentaire) dépend d'un changement réel. Et si
-        # aucune règle n'a eu de raison de toucher D/L, on force quand même la casse en
-        # MAJUSCULES (jamais marqué, ce n'est qu'une question de casse).
+        # Écrit toujours la valeur normalisée (D en KG/L/PC, L quand il est fiable) — même une
+        # simple normalisation silencieuse (kg -> KG) est appliquée. Seule la mise en évidence
+        # (couleur + commentaire) dépend d'un changement réel. Et si aucune règle n'a eu de
+        # raison de toucher D/L, on force quand même la casse en MAJUSCULES (jamais marqué, ce
+        # n'est qu'une question de casse).
+        #
+        # Le prix de référence (K), lui, n'est JAMAIS écrit automatiquement, même quand le
+        # script est confiant dans son calcul — uniquement surligné (couleur) et commenté
+        # (resultat.commentaire_k, ci-dessous), exactement comme les incohérences : une
+        # personne valide toujours le changement de prix elle-même.
         if resultat.nouveau_d is not None:
             valeur_d = resultat.nouveau_d.upper() if isinstance(resultat.nouveau_d, str) else resultat.nouveau_d
             ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]).value = valeur_d
@@ -1354,13 +2113,13 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
             maj = majuscule_si_inchangee(unite_cmd)
             if maj:
                 ws.cell(row=ligne, column=fournisseur["unite_cmd"]).value = maj
-        if resultat.nouveau_k is not None:
-            ws.cell(row=ligne, column=fournisseur["prix_ref"]).value = resultat.nouveau_k
 
         if resultat.couleur_d in COULEURS_INCOHERENCE and resultat.commentaire_d and (
                 d_differe or resultat.nouveau_d is None):
-            marque(ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]),
-                   resultat.couleur_d, fournisseur["nom"], resultat.commentaire_d)
+            # Pas de commentaire sur l'unité de référence : la couleur seule suffit.
+            cel_d = ws.cell(row=ligne, column=fournisseur["_col_unite_ref"])
+            cel_d.fill = PatternFill(start_color=resultat.couleur_d,
+                                      end_color=resultat.couleur_d, fill_type="solid")
             total += 1
         if resultat.couleur_k in COULEURS_INCOHERENCE and resultat.commentaire_k and (
                 k_differe or resultat.nouveau_k is None):
@@ -1369,51 +2128,52 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
             total += 1
         if resultat.couleur_l in COULEURS_INCOHERENCE and resultat.commentaire_l and (
                 l_differe or resultat.nouveau_l is None):
-            marque(ws.cell(row=ligne, column=fournisseur["unite_cmd"]), resultat.couleur_l,
-                   fournisseur["nom"], resultat.commentaire_l)
+            # Jamais de commentaire sur l'unité de commande : la couleur seule suffit (quelle
+            # que soit la couleur — changement confiant ou simple palpite à vérifier).
+            cel_l = ws.cell(row=ligne, column=fournisseur["unite_cmd"])
+            cel_l.fill = PatternFill(start_color=resultat.couleur_l,
+                                      end_color=resultat.couleur_l, fill_type="solid")
             total += 1
         if resultat.couleur_m in COULEURS_INCOHERENCE and resultat.commentaire_m:
             marque(ws.cell(row=ligne, column=fournisseur["prix_cmd"]), resultat.couleur_m,
                    fournisseur["nom"], resultat.commentaire_m)
             total += 1
 
-        if indice_prix:
-            base_final = _base_comparable(resultat.nouveau_d or unite_ref)
-            k_final = resultat.nouveau_k if resultat.nouveau_k is not None else prix_ref
-            # 'PC' exclu : le prix à la pièce ne dit rien du prix au kilo tant que le poids de
-            # la pièce n'est pas connu avec fiabilité (sinon D serait déjà devenu 'KG') — le
-            # comparer à d'autres prix à la pièce, de tailles de pièce différentes, n'a pas de
-            # sens et ne fait que produire de faux signalements.
-            if base_final in ("kg", "l") and k_final and k_final > 0:
-                def signale_prix_outlier(stats_groupe, seuil, portee, origine):
-                    mediane, n_observations = stats_groupe
-                    ratio = k_final / mediane
-                    if ratio <= seuil and ratio >= (1 / seuil):
-                        return 0
-                    comparaison = (f"×{round(ratio, 1)}" if ratio >= 1
-                                    else f"÷{round(1 / ratio, 1)}")
-                    marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]),
-                           motor.COULEUR_PRIX_OUTLIER, fournisseur["nom"],
-                           f"Prix de référence ({k_final} / {base_final}) très éloigné de "
-                           f"{portee} ({n_observations} lignes comparables{origine}) : médiane "
-                           f"{round(mediane, 4)} / {base_final}, soit un facteur {comparaison}. "
-                           "Peut être une erreur de saisie (zéro en trop/en moins, confusion "
-                           "d'unité...) ou un vrai écart de prix — à vérifier.")
-                    return 1
-
-                stats_produit = indice_prix["produit"].get(
-                    (base_final, motor.normalise_pour_doublon(designation)))
-                if stats_produit:
-                    total += signale_prix_outlier(
-                        stats_produit, 3, f"celui des autres lignes de '{designation}'", "")
-
-                if lot_valor:
-                    stats_categorie = indice_prix["categorie"].get(
-                        (base_final, motor.normalise_pour_doublon(lot_valor)))
-                    if stats_categorie:
-                        total += signale_prix_outlier(
-                            stats_categorie, 5, f"celui de la catégorie '{lot_valor}'",
-                            f", catégorie '{lot_valor}'")
+        # Signalement des prix "outliers" (comparés à la médiane des autres lignes/catégories)
+        # désactivé à la demande — seule la cohérence interne de la ligne reste vérifiée.
+        # if indice_prix:
+        #     base_final = _base_comparable(resultat.nouveau_d or unite_ref)
+        #     k_final = resultat.nouveau_k if resultat.nouveau_k is not None else prix_ref
+        #     if base_final in ("kg", "l") and k_final and k_final > 0:
+        #         def signale_prix_outlier(stats_groupe, seuil, portee, origine):
+        #             mediane, n_observations = stats_groupe
+        #             ratio = k_final / mediane
+        #             if ratio <= seuil and ratio >= (1 / seuil):
+        #                 return 0
+        #             comparaison = (f"×{round(ratio, 1)}" if ratio >= 1
+        #                             else f"÷{round(1 / ratio, 1)}")
+        #             marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]),
+        #                    motor.COULEUR_PRIX_OUTLIER, fournisseur["nom"],
+        #                    f"Prix de référence ({k_final} / {base_final}) très éloigné de "
+        #                    f"{portee} ({n_observations} lignes comparables{origine}) : médiane "
+        #                    f"{round(mediane, 4)} / {base_final}, soit un facteur {comparaison}. "
+        #                    "Peut être une erreur de saisie (zéro en trop/en moins, confusion "
+        #                    "d'unité...) ou un vrai écart de prix — à vérifier.")
+        #             return 1
+        #
+        #         stats_produit = indice_prix["produit"].get(
+        #             (base_final, motor.normalise_pour_doublon(designation)))
+        #         if stats_produit:
+        #             total += signale_prix_outlier(
+        #                 stats_produit, 3, f"celui des autres lignes de '{designation}'", "")
+        #
+        #         if lot_valor:
+        #             stats_categorie = indice_prix["categorie"].get(
+        #                 (base_final, motor.normalise_pour_doublon(lot_valor)))
+        #             if stats_categorie:
+        #                 total += signale_prix_outlier(
+        #                     stats_categorie, 5, f"celui de la catégorie '{lot_valor}'",
+        #                     f", catégorie '{lot_valor}'")
     else:
         # Prix manquant(s) : aucune des règles ci-dessus n'a pu s'exécuter, mais la casse de
         # D/L doit quand même être forcée en MAJUSCULES (jamais marqué).
@@ -1424,12 +2184,67 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
         if maj_l:
             ws.cell(row=ligne, column=fournisseur["unite_cmd"]).value = maj_l
 
-    if unite_cmd:
-        ok, message = verifie_unite_commande_etendue(unite_cmd, conditionnement, designation)
+    # Si l'unité de commande vient d'être corrigée automatiquement (mot repris du
+    # conditionnement, contenant à double imbrication, 'LOT DE N'...), valider contre la
+    # NOUVELLE valeur, pas l'ancienne — sinon on re-signale à tort ce qui vient justement
+    # d'être corrigé.
+    unite_cmd_a_verifier = (resultat.nouveau_l
+                             if resultat is not None and resultat.nouveau_l is not None
+                             else unite_cmd)
+    if unite_cmd_a_verifier:
+        ok, message = verifie_unite_commande_etendue(unite_cmd_a_verifier, conditionnement,
+                                                       designation)
         if not ok:
-            marque(ws.cell(row=ligne, column=fournisseur["unite_cmd"]), motor.COULEUR_COMMANDE_SUSPECTE,
+            # Le récipient nommé dans le Conditionnement reste fiable même quand la quantité
+            # ne peut pas être confirmée (ex: 'CARTON 10 POCHE', aucun poids donné) — on le
+            # reprend directement, sauf quand l'unité de commande actuelle est déjà KG/L
+            # (commander au poids reste un choix valable, voir plus haut dans cette fonction).
+            base_cmd_actuelle = motor.normalise_texte(unite_cmd_a_verifier)
+            mot_trouve = (None if base_cmd_actuelle in ("kg", "l", "litre")
+                          else mot_contenant_dans_conditionnement(conditionnement))
+            abrege = motor.CONTENANT_ABREGE.get(mot_trouve, mot_trouve.upper()) if mot_trouve else None
+            cel_l = ws.cell(row=ligne, column=fournisseur["unite_cmd"])
+            if abrege and motor.normalise_texte(abrege) != base_cmd_actuelle:
+                cel_l.value = abrege
+                cel_l.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
+                                          end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+            else:
+                # Jamais de commentaire sur l'unité de commande : la couleur seule suffit.
+                cel_l.fill = PatternFill(start_color=motor.COULEUR_COMMANDE_SUSPECTE,
+                                          end_color=motor.COULEUR_COMMANDE_SUSPECTE, fill_type="solid")
+            total += 1
+
+    col_origine = fournisseur.get("origine")
+    if col_origine:
+        valeur_origine = ws_valeurs.cell(row=ligne, column=col_origine).value
+        ok, message = verifie_origine(valeur_origine)
+        if not ok:
+            marque(ws.cell(row=ligne, column=col_origine), motor.COULEUR_A_VERIFIER,
                    fournisseur["nom"], message)
             total += 1
+
+    # Bio/Label détectés depuis la Désignation (article ou fournisseur) quand mentionnés
+    # explicitement — ne remplit que des cellules vides, ne déduit jamais rien. Une cellule
+    # vide ne veut donc dire QUE "non détecté dans le texte", pas "confirmé non bio/non
+    # labellisé" — colorée (comme les autres remplissages automatiques) mais sans commentaire.
+    texte_bio_label = f"{designation or ''} {desig_fourn or ''}"
+    col_bio = fournisseur.get("bio")
+    if col_bio:
+        cel_bio = ws.cell(row=ligne, column=col_bio)
+        if (cel_bio.value is None and RE_BIO_DETECTE.search(texte_bio_label)
+                and not RE_BIO_NEGATION.search(texte_bio_label)):
+            cel_bio.value = "X"
+            cel_bio.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
+                                        end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+    col_label = fournisseur.get("label")
+    if col_label:
+        cel_label = ws.cell(row=ligne, column=col_label)
+        if cel_label.value is None:
+            m_label = RE_LABEL_DETECTE.search(texte_bio_label)
+            if m_label:
+                cel_label.value = m_label.group().upper()
+                cel_label.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
+                                              end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
 
     if reference and RE_REFERENCES_MULTIPLES.search(str(reference)):
         marque(ws.cell(row=ligne, column=fournisseur["ref"]), motor.COULEUR_A_VERIFIER,
@@ -1443,20 +2258,22 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
 
 
 def detecte_lignes_dupliquees(ws_valeurs, ligne_debut, col_designation, derniere_colonne):
-    """Repère les lignes dupliquées : toutes les colonnes comparées identiques, SAUF
-    éventuellement la Désignation elle-même (espace en trop, suffixe 'CE2'...). Exige un
+    """Repère les lignes STRICTEMENT dupliquées : toutes les colonnes identiques, Désignation
+    de l'article comprise (tolère juste un espace en trop/la casse, via normalise_pour_doublon).
+    Une même Référence + même prix mais une Désignation réellement différente (ex: 'BIO' vs
+    'LR') n'est PAS une duplicata complète — ce cas reste couvert par
+    signale_copies_possibles_fournisseur()/signale_designation_dupliquee(), qui ne se
+    trompent pas sur un simple écart de référence/prix entre deux produits distincts. Exige un
     minimum de valeurs réellement remplies pour éviter que deux lignes très peu renseignées
     (juste Marché/Lot/Fournisseur) ne soient prises pour des doublons."""
     MINIMUM_CHAMPS_REMPLIS = 8
 
-    colonnes_cle = [c for c in range(1, derniere_colonne + 1) if c != col_designation]
+    colonnes_cle = list(range(1, derniere_colonne + 1))
     lignes_vues = {}
-    designation_normalisee = {}
     for ligne in range(ligne_debut, ws_valeurs.max_row + 1):
         designation = ws_valeurs.cell(row=ligne, column=col_designation).value
         if not designation:
             continue
-        designation_normalisee[ligne] = motor.normalise_pour_doublon(designation)
         valeurs = [ws_valeurs.cell(row=ligne, column=c).value for c in colonnes_cle]
         if sum(1 for v in valeurs if v not in (None, "")) < MINIMUM_CHAMPS_REMPLIS:
             continue
@@ -1467,15 +2284,14 @@ def detecte_lignes_dupliquees(ws_valeurs, ligne_debut, col_designation, derniere
     for lignes in lignes_vues.values():
         if len(lignes) < 2:
             continue
-        designations_identiques = len({designation_normalisee[l] for l in lignes}) == 1
         for ligne in lignes:
-            doublons[ligne] = ([l for l in lignes if l != ligne], designations_identiques)
+            doublons[ligne] = ([l for l in lignes if l != ligne], True)
     return doublons
 
 
 def marque_lignes_dupliquees(ws, doublons, col_designation):
     total = 0
-    for ligne, (autres, designations_identiques) in doublons.items():
+    for ligne, (autres, _designations_identiques) in doublons.items():
         premiere_occurrence = min([ligne] + autres)
         if ligne == premiere_occurrence:
             continue
@@ -1486,21 +2302,59 @@ def marque_lignes_dupliquees(ws, doublons, col_designation):
             ws.cell(row=ligne, column=colonne).fill = fill_rouge
 
         cel = ws.cell(row=ligne, column=col_designation)
-        if designations_identiques:
-            texte = (f"Ligne strictement dupliquée (contenu identique) de la ligne "
-                     f"{premiere_occurrence}. Toute la ligne est surlignée en rouge — ce "
-                     "script ne supprime rien, à vous de choisir laquelle garder.")
-        else:
-            texte = (f"Ligne dupliquée de la ligne {premiere_occurrence} : toutes les colonnes "
-                     "sont identiques (référence, prix, fournisseur, conditionnement...), SAUF "
-                     "la Désignation, qui diffère légèrement (espace, suffixe 'CE2'...). Toute "
-                     "la ligne est surlignée en rouge — ce script ne supprime rien, à vous de "
-                     "choisir laquelle garder.")
+        texte = (f"Ligne strictement dupliquée (contenu identique) de la ligne "
+                 f"{premiere_occurrence}. Toute la ligne est surlignée en rouge — ce "
+                 "script ne supprime rien, à vous de choisir laquelle garder.")
         if cel.comment:
             cel.comment.text = cel.comment.text + "\n\n" + texte
         else:
             cel.comment = Comment(texte, AUTEUR_COMMENTAIRE)
         total += 1
+    return total
+
+
+def signale_designation_dupliquee(ws, ws_valeurs, ligne_debut, col_designation, fournisseurs,
+                                   lignes_a_exclure):
+    """Signale les lignes qui partagent exactement la même Désignation de l'article qu'une
+    autre ligne ET au moins un même fournisseur (même produit décrit deux fois chez le MÊME
+    fournisseur — pas besoin que le reste de la ligne diffère aussi, juste que ce ne soit pas
+    déjà un doublon complet). Même désignation mais fournisseurs totalement différents n'est
+    PAS signalé ici : avoir le même produit chez différents fournisseurs est normal, pas une
+    entrée en double (une règle dédiée à ce cas est prévue plus tard, pas encore ici).
+    'lignes_a_exclure' : lignes qui font partie d'un doublon COMPLET (toute la ligne identique,
+    pas seulement la désignation) — déjà repeintes en rouge par ailleurs, elles ne comptent
+    pas ici."""
+    groupes = {}
+    for ligne in range(ligne_debut, ws_valeurs.max_row + 1):
+        if ligne in lignes_a_exclure:
+            continue
+        designation = ws_valeurs.cell(row=ligne, column=col_designation).value
+        if designation:
+            groupes.setdefault(motor.normalise_pour_doublon(designation), []).append(ligne)
+
+    def noms_fournisseurs(ligne):
+        noms = set()
+        for f in fournisseurs:
+            valeur = ws_valeurs.cell(row=ligne, column=f["cond"] - 1).value
+            if valeur:
+                noms.add(motor.normalise_pour_doublon(valeur))
+        return noms
+
+    total = 0
+    for lignes in groupes.values():
+        if len(lignes) < 2:
+            continue
+        noms_par_ligne = {l: noms_fournisseurs(l) for l in lignes}
+        for ligne in lignes:
+            autres = [l for l in lignes if l != ligne and (noms_par_ligne[l] & noms_par_ligne[ligne])]
+            if not autres:
+                continue
+            marque(ws.cell(row=ligne, column=col_designation), motor.COULEUR_COPIE_POSSIBLE,
+                   None,
+                   f"Même Désignation de l'article que la ligne "
+                   f"{' et '.join(str(l) for l in autres)} (même fournisseur) — à comparer, peut "
+                   "être une vraie variante ou une entrée en double.")
+            total += 1
     return total
 
 
@@ -1557,14 +2411,15 @@ def comble_marche_lot(ws, ws_valeurs, ligne_debut, col_designation, col_marche, 
                 ws.cell(row=ligne, column=col_lot).value = lot_dessus
             total_rempli += 1
         else:
+            # Pas de commentaire : la couleur seule suffit (cellule vide à préciser).
             if col_marche and marche_vide:
-                marque(ws.cell(row=ligne, column=col_marche), motor.COULEUR_A_VERIFIER, None,
-                       "Marché vide, et les lignes voisines ne s'accordent pas — préciser le "
-                       "Marché correspondant à cette ligne.")
+                cel = ws.cell(row=ligne, column=col_marche)
+                cel.fill = PatternFill(start_color=motor.COULEUR_A_VERIFIER,
+                                        end_color=motor.COULEUR_A_VERIFIER, fill_type="solid")
             if col_lot and lot_vide:
-                marque(ws.cell(row=ligne, column=col_lot), motor.COULEUR_A_VERIFIER, None,
-                       "Lot vide, et les lignes voisines ne s'accordent pas — préciser le Lot "
-                       "correspondant à cette ligne.")
+                cel = ws.cell(row=ligne, column=col_lot)
+                cel.fill = PatternFill(start_color=motor.COULEUR_A_VERIFIER,
+                                        end_color=motor.COULEUR_A_VERIFIER, fill_type="solid")
             total_signale += 1
     return total_rempli, total_signale
 
@@ -1610,6 +2465,7 @@ TITRES_CATEGORIES_RAPPORT = {
     "prix_cmd": "Prix de commande incohérent / inexpliqué",
     "poids_rempli": "Poids à l'unité de référence — rempli automatiquement",
     "valeurs_manquantes": "Valeurs manquantes (prix de référence ou de commande)",
+    "origine": "Origine non reconnue / ambiguë",
 }
 
 
@@ -1624,6 +2480,7 @@ def calcule_categories_rapport(ws, ws_valeurs, ligne_debut, col_designation, col
     colonnes_prix_ref = {f["prix_ref"] for f in fournisseurs}
     colonnes_unite_cmd = {f["unite_cmd"] for f in fournisseurs}
     colonnes_prix_cmd = {f["prix_cmd"] for f in fournisseurs}
+    colonnes_origine = {f["origine"] for f in fournisseurs if f.get("origine")}
 
     for ligne in range(ligne_debut, ws.max_row + 1):
         designation = ws_valeurs.cell(row=ligne, column=col_designation).value
@@ -1656,6 +2513,8 @@ def calcule_categories_rapport(ws, ws_valeurs, ligne_debut, col_designation, col
                     categories["valeurs_manquantes"].append((ligne, designation, texte))
                 else:
                     categories["prix_cmd"].append((ligne, designation, texte))
+            elif colonne in colonnes_origine:
+                categories["origine"].append((ligne, designation, texte))
 
     return categories
 
@@ -1709,6 +2568,36 @@ def gele_formules_externes(ws, ws_valeurs):
     return total
 
 
+def derive_unite_ref_vide(ws_valeurs, ligne, fournisseurs):
+    """Quand l'unité de référence est vide, tente de la déduire d'un Conditionnement propre
+    (motif reconnu, pas une recherche floue) dont la quantité est EXACTEMENT confirmée par le
+    ratio Prix de commande ÷ Prix de référence d'un fournisseur rempli. Si plusieurs
+    fournisseurs sont remplis et se contredisent (bases différentes), on ne déduit rien —
+    mieux vaut laisser vide à compléter que de deviner sur un désaccord."""
+    bases_confirmees = set()
+    for f in fournisseurs:
+        conditionnement = ws_valeurs.cell(row=ligne, column=f["cond"]).value
+        prix_ref = ws_valeurs.cell(row=ligne, column=f["prix_ref"]).value
+        prix_cmd = ws_valeurs.cell(row=ligne, column=f["prix_cmd"]).value
+        if not conditionnement or not prix_ref or not prix_cmd:
+            continue
+        info = determine_base_et_quantite(nettoie_conditionnement(conditionnement))
+        if not info:
+            continue
+        base, quantite, _mot = info
+        if not quantite or quantite <= 0:
+            continue
+        try:
+            ratio = prix_cmd / prix_ref
+        except (TypeError, ZeroDivisionError):
+            continue
+        if abs(ratio - quantite) <= motor.TOLERANCE_RATIO * quantite:
+            bases_confirmees.add(base)
+    if len(bases_confirmees) == 1:
+        return bases_confirmees.pop()
+    return None
+
+
 def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
     gele_formules_externes(ws, ws_valeurs)
     ligne_debut = info["ligne_debut_donnees"]
@@ -1717,13 +2606,32 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
     col_designation = info["col_designation"]
     col_unite_ref = info["col_unite_ref"]
     col_poids_ref = info["col_poids_ref"]
+    col_nb_pieces = info["col_nb_pieces"]
     fournisseurs = info["fournisseurs"]
     for f in fournisseurs:
         f["_col_unite_ref"] = col_unite_ref  # utilisé par audite_fournisseur
 
+    # Colonnes de prix toujours au même format monétaire (2 décimales, "€" à la fin), même
+    # quand la valeur n'a pas été modifiée par l'audit — les fichiers sources mélangent des
+    # formats différents d'une ligne à l'autre.
+    for ligne in range(ligne_debut, ws_valeurs.max_row + 1):
+        for f in fournisseurs:
+            ws.cell(row=ligne, column=f["prix_ref"]).number_format = '0.00"€"'
+            ws.cell(row=ligne, column=f["prix_cmd"]).number_format = '0.00"€"'
+
     stats = {"lignes_avec_incoherence": 0, "marques": 0, "unite_ref_vide": 0,
               "lignes_dupliquees": 0, "copies_possibles": 0, "lots_normalises": 0,
               "marche_lot_rempli": 0, "marche_lot_signale": 0, "lignes_vides_a_supprimer": 0}
+
+    # Calculé tôt (pas seulement en fin de fonction) pour que signale_designation_dupliquee()
+    # puisse exclure les lignes déjà couvertes par le doublon de ligne COMPLÈTE (repeint en
+    # rouge plus bas, avec ce même dict). Note : la détection par Référence+Conditionnement+
+    # Prix (en ignorant la désignation) n'alimente plus ce rouge — elle faisait doublon avec
+    # signale_copies_possibles_fournisseur()/signale_designation_dupliquee() (rose), qui
+    # couvrent déjà ce cas sans supposer à tort que la désignation ne diffère que légèrement
+    # (ex: 'BIO' vs 'LR' sont des produits différents, pas une faute de frappe).
+    doublons = detecte_lignes_dupliquees(ws_valeurs, ligne_debut, col_designation,
+                                         info["derniere_colonne_cle_doublon"])
 
     stats["marche_lot_rempli"], stats["marche_lot_signale"] = comble_marche_lot(
         ws, ws_valeurs, ligne_debut, col_designation, col_marche, col_lot)
@@ -1733,6 +2641,9 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
     for fournisseur in fournisseurs:
         stats["copies_possibles"] += signale_copies_possibles_fournisseur(
             ws, ws_valeurs, ligne_debut, fournisseur)
+
+    stats["copies_possibles"] += signale_designation_dupliquee(
+        ws, ws_valeurs, ligne_debut, col_designation, fournisseurs, set(doublons))
 
     for ligne in range(ligne_debut, ws_valeurs.max_row + 1):
         designation = ws_valeurs.cell(row=ligne, column=col_designation).value
@@ -1768,12 +2679,52 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
         poids_ref = ws_valeurs.cell(row=ligne, column=col_poids_ref).value if col_poids_ref else None
         lot_valor = ws_valeurs.cell(row=ligne, column=col_lot).value if col_lot else None
 
-        if not unite_ref:
-            marque(ws.cell(row=ligne, column=col_unite_ref), motor.COULEUR_A_VERIFIER, None,
-                   "Unité de référence vide — à compléter manuellement.")
-            stats["unite_ref_vide"] += 1
+        # "Poids à l'unité de référence" écrit en texte libre (ex: 'seau de 5 kg', '100 g')
+        # au lieu d'un nombre : réutilise le même parseur que pour le Conditionnement (même
+        # vocabulaire de récipients) pour en extraire la valeur numérique. Sans ça, le texte
+        # est traité comme "déjà rempli" (il n'est pas vide), ce qui masquait silencieusement
+        # une vraie incohérence de type.
+        poids_texte_marque = False
+        if poids_ref and not isinstance(poids_ref, (int, float)):
+            resultat_texte = determine_base_et_quantite(nettoie_conditionnement(str(poids_ref)))
+            cel_poids = ws.cell(row=ligne, column=col_poids_ref)
+            if resultat_texte and resultat_texte[0] in ("kg", "l", "litre"):
+                quantite_texte = round(resultat_texte[1], 3)
+                cel_poids.value = quantite_texte
+                cel_poids.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
+                                              end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+                cel_poids.comment = Comment(
+                    f"Poids à l'unité de référence interprété à partir du texte d'origine "
+                    f"('{poids_ref}') : {quantite_texte}.", AUTEUR_COMMENTAIRE)
+                poids_ref = quantite_texte
+            else:
+                marque(cel_poids, motor.COULEUR_A_VERIFIER, None,
+                       f"Poids à l'unité de référence ('{poids_ref}') est du texte, pas un "
+                       "nombre, et n'a pas pu être interprété automatiquement — à convertir "
+                       "manuellement en kg/L.")
             stats["marques"] += 1
-            continue
+            poids_texte_marque = True
+
+        if not unite_ref:
+            base_deduite = derive_unite_ref_vide(ws_valeurs, ligne, fournisseurs)
+            if base_deduite:
+                # Conditionnement + ratio de prix confirment exactement la base : on remplit
+                # avec confiance (couleur seule, pas de commentaire), au lieu de signaler vide.
+                unite_ref = base_deduite.upper()
+                cel_remplie = ws.cell(row=ligne, column=col_unite_ref)
+                cel_remplie.value = unite_ref
+                cel_remplie.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
+                                                end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+                stats["marques"] += 1
+            else:
+                # Pas de commentaire ici : la couleur seule suffit (vide = à compléter), un
+                # commentaire par ligne alourdit le fichier pour rien.
+                cel_vide = ws.cell(row=ligne, column=col_unite_ref)
+                cel_vide.fill = PatternFill(start_color=motor.COULEUR_A_VERIFIER,
+                                             end_color=motor.COULEUR_A_VERIFIER, fill_type="solid")
+                stats["unite_ref_vide"] += 1
+                stats["marques"] += 1
+                continue
 
         # Force la casse en MAJUSCULES dès maintenant (jamais marqué) : couvre aussi les
         # lignes où AUCUN fournisseur n'a de prix (donc audite_fournisseur() ne s'exécute
@@ -1782,10 +2733,11 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
         if maj_d:
             ws.cell(row=ligne, column=col_unite_ref).value = maj_d
 
-        ligne_a_un_probleme = False
+        ligne_a_un_probleme = poids_texte_marque
         for fournisseur in fournisseurs:
             n = audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
-                                    fournisseur, col_poids_ref, lot_valor, indice_prix)
+                                    fournisseur, col_poids_ref, lot_valor, indice_prix,
+                                    col_nb_pieces)
             if n:
                 ligne_a_un_probleme = True
                 stats["marques"] += n
@@ -1793,49 +2745,13 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
             stats["lignes_avec_incoherence"] += 1
 
     # Appliqué en dernier pour que le rouge des lignes dupliquées ne soit jamais recouvert par
-    # une autre couleur posée cellule par cellule plus haut.
-    doublons = detecte_lignes_dupliquees(ws_valeurs, ligne_debut, col_designation,
-                                         info["derniere_colonne_cle_doublon"])
-    doublons_ref = detecte_doublons_par_reference(ws_valeurs, ligne_debut, fournisseurs)
-    for ligne, (autres, _) in doublons_ref.items():
-        if ligne not in doublons:
-            doublons[ligne] = (autres, False)
+    # une autre couleur posée cellule par cellule plus haut (doublons calculé plus haut).
     stats["lignes_dupliquees"] = marque_lignes_dupliquees(ws, doublons, col_designation)
 
     applique_formatage_uniforme(ws, ligne_debut)
 
     return stats
 
-
-def detecte_doublons_par_reference(ws_valeurs, ligne_debut, fournisseurs):
-    """Même Référence produit + même Conditionnement + même Prix de référence, pour un même
-    fournisseur : signe très fort qu'il s'agit de la MÊME ligne de produit, même si la
-    désignation diffère un peu (ex: 'œufs' vs 'œuf') et même si le poids/prix de commande
-    (souvent recalculés ou mal copiés) diffèrent. Traité comme une ligne dupliquée (rouge),
-    pas seulement 'référence en double' (rose)."""
-    lignes_vues = {}
-    for fournisseur in fournisseurs:
-        for ligne in range(ligne_debut, ws_valeurs.max_row + 1):
-            ref = ws_valeurs.cell(row=ligne, column=fournisseur["ref"]).value
-            cond = ws_valeurs.cell(row=ligne, column=fournisseur["cond"]).value
-            k = ws_valeurs.cell(row=ligne, column=fournisseur["prix_ref"]).value
-            if ref is None or cond is None or k is None:
-                continue
-            cle = (fournisseur["nom"], motor.normalise_pour_doublon(ref),
-                   motor.normalise_pour_doublon(cond), k)
-            lignes_vues.setdefault(cle, []).append(ligne)
-
-    doublons = {}
-    for lignes in lignes_vues.values():
-        if len(lignes) < 2:
-            continue
-        for ligne in lignes:
-            autres = [l for l in lignes if l != ligne]
-            if ligne in doublons:
-                doublons[ligne] = (sorted(set(doublons[ligne][0]) | set(autres)), False)
-            else:
-                doublons[ligne] = (autres, False)
-    return doublons
 
 
 def audite_classeur(wb_valeurs, wb, indice_prix=None):
