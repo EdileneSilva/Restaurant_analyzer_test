@@ -42,6 +42,20 @@ fournisseurs qui ne sont pas déjà dans ce format.
 Le détail fichier par fichier (source, date de réception, statut, anonymisation) est dans
 [`inventaire_echantillons.csv`](inventaire_echantillons.csv).
 
+## Documentation de référence
+
+- [`format_cible.md`](format_cible.md) — schéma détaillé du format canonique, colonne par
+  colonne (obligatoire/optionnel, valeurs autorisées).
+- [`catalogue_erreurs.md`](catalogue_erreurs.md) — catalogue des règles de cohérence codées
+  dans `audit_geral.py`, avec un exemple réel par règle, et le jeu de résultats de référence
+  (non-régression) sur les 7 fichiers de `pret_pour_audit/`.
+- [`unites_commande_non_reconnues.md`](unites_commande_non_reconnues.md) — écart entre les
+  unités tolérées par l'outil et celles réellement acceptées par la base de données
+  d'intégration.
+- [`analyse_exploratoire.md`](analyse_exploratoire.md) — analyse ponctuelle (TT-03) de
+  l'échantillon de fichiers reçus avant la mise en place du format canonique ; photo d'un
+  instant donné, pas mise à jour au fil de l'eau.
+
 ## Lancer l'app
 
 ```

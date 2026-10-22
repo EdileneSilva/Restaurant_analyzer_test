@@ -24,6 +24,9 @@ confirmés dans `pret_pour_audit/`), gravité pressentie, et si une règle exist
   manuellement.
 - **Gravité pressentie** : bloquante — sans cette valeur, impossible de comparer prix/unité.
 - **Couverte par le code** : oui.
+- **Mise à jour 2026-10-22** : cette catégorie de rapport (`unite_ref_vide`) n'existe plus en
+  tant que telle — fusionnée dans la nouvelle catégorie n°27 ("Champs obligatoires vides"),
+  marquée en orange avec un commentaire explicite au lieu d'une simple couleur grise muette.
 
 ### 4. Unité de référence incohérente (`unite_ref`)
 - **Exemple réel** : ligne 369, "ANETH" — unité changée de 'PC' vers 'KG' car le
@@ -64,6 +67,10 @@ confirmés dans `pret_pour_audit/`), gravité pressentie, et si une règle exist
 - **Exemple réel** : ligne 200, "EMINCE DE PORC FERMIER" — prix de commande manquant.
 - **Gravité pressentie** : bloquante.
 - **Couverte par le code** : oui.
+- **Mise à jour 2026-10-22** : en réalité, cette catégorie de rapport n'a jamais été remplie
+  (aucun code ne produisait le mot "manquant" dans un commentaire — un prix vide était
+  seulement colorié en gris, sans texte). Catégorie supprimée, remplacée par la n°27 ("Champs
+  obligatoires vides"), qui elle couvre vraiment ce cas.
 
 ### 10. Contenant à double imbrication, unité de référence 'PC' imprécise (CAS 3)
 - **Exemple réel** : `Base article groupement 1.xlsx` et `2.xlsx`, lignes "GOURDE
@@ -198,22 +205,163 @@ confirmés dans `pret_pour_audit/`), gravité pressentie, et si une règle exist
   un futur script de transformation de ce format s'il n'est pas anticipé.
 - **Couverte par le code** : non applicable (format pas encore pris en charge).
 
+## Erreurs et règles ajoutées depuis (2026-10-20 à 2026-10-22)
+
+Le jeu de fichiers de référence est passé de 5 à **7 fichiers** (ajout de
+`2026 09 22 Base article groupement 5.xlsx` et `2026 09 22 Base article groupement
+commun.xlsx`). Les règles ci-dessous ont été ajoutées ou corrigées en les auditant.
+
+### 21. Palette de couleurs consolidée (8 → 6, + 1 nouvelle)
+
+Les couleurs historiques, qui se recoupaient sémantiquement, ont été fusionnées en 6, plus
+une 7e ajoutée depuis pour un besoin différent (complétude, pas cohérence) :
+
+| Catégorie | Couleur (ARGB) |
+|---|---|
+| Changement confirmé (D/L recalculés avec confirmation par le ratio des prix) | `FF93CDDC` (bleu) |
+| Cellule vide / aucune conversion fiable / champ optionnel vide | `FFBFBFBF` (gris) |
+| Incohérence (prix suggéré non appliqué, unité de commande suspecte...) | `FFD5A6BD` (rose/mauve) |
+| Prix sans aucune explication dans le texte | `FF92D050` (vert) |
+| Copie possible (même Référence+prix, ou même Désignation) | `FFFF6969` (rouge clair) |
+| Ligne strictement dupliquée (ligne entière) | `FFFF0000` (rouge vif) |
+| **Champ obligatoire vide** (nouveau, n°27 ci-dessous) | `FFFABF8F` (orange) |
+
+### 22. Le prix de référence (K) n'est JAMAIS écrit automatiquement
+
+Avant : quand le script était confiant dans un recalcul de prix de référence, il écrivait la
+nouvelle valeur (couleur bleue). **Décision changée** : même un recalcul confiant n'est plus
+jamais appliqué automatiquement — seulement surligné en rose + commenté ("Prix de référence
+suggéré : ... — à vérifier, non modifié automatiquement"), exactement comme une incohérence.
+Une personne valide toujours elle-même un changement de prix. Modifié à la fois dans
+`audit_geral.py` et dans le moteur partagé `first_scripts/first_attempt_v2_prototype.py`.
+
+### 23. Vocabulaire de récipients très étendu
+
+`MOTS_CONTENANT` est passé de ~22 à 32 mots, au fil des fichiers réels rencontrés : ajout de
+`bac`, `coffret`, `plaquette`, `paquet`, `etui`/`étui`, `bombe` (+ `bouteile`, faute de frappe
+fréquente à un seul L, déjà tolérée). Une seconde liste séparée (`mots_types` dans
+`verifie_unite_commande_etendue`) doit être tenue à jour EN PARALLÈLE à chaque ajout — sinon
+l'unité de commande fraîchement confirmée est re-signalée à tort comme incohérente juste
+après (bug trouvé et corrigé plusieurs fois ce lot-ci).
+
+### 24. Formats de conditionnement supplémentaires reconnus
+
+- `CARTON 6 PIECES DE 300 GR` (sans "DE" entre le récipient et le nombre).
+- `COLIS 30 G X100` / `COLIS X960 5 KG` (poids et compte dans n'importe quel ordre, séparés
+  par "X" collé au nombre).
+- `CARTON X 5 ST X 1 KG` (sachet abrégé en "ST", reconnu UNIQUEMENT à cette position précise
+  — pas ajouté au vocabulaire général des récipients, trop court et ambigu ailleurs).
+- `PIECE DE 8 PORTIONS` (le mot de comptage final n'est plus limité à une liste fermée :
+  "pièces"/"u"/"portions"/"tranches", ou n'importe quel autre mot qui n'est pas lui-même une
+  unité de poids/volume reconnue — ex: "CAGEOT BOIS 12 U", "CARTON 14 SACHETS").
+- Qualificatifs de matière à un ou plusieurs mots entre le récipient et sa quantité
+  ("CAISSE BOIS 10 KG", "CAGEOT BOIS OU CARTON 5KG").
+- `CONTENANT DE N X QTÉ UNITÉ` dont le ratio confirme N exactement (pas la quantité totale) :
+  réinterprété comme "prix par sous-paquet", Unité de référence devient `PC`, le poids d'un
+  sous-paquet renseigne la colonne 5, prix inchangés (ex: "CARTON DE 9 X 500 GR" avec ratio=9).
+
+### 25. "LOT DE N" : l'unité de commande ne garde que "LOT"
+
+Avant : l'unité de commande pouvait devenir "LOT DE 4". **Décision changée** : elle ne garde
+que `LOT` (le nombre n'est pas vraiment une unité), et le nombre est reporté en préfixe du
+Conditionnement ("LOT DE 4, 4 x 125g") — sauf si le mot "lot" y figure déjà sous une forme ou
+une autre, pour ne pas le répéter. Centralisé au point d'écriture unique de la colonne Unité
+de commande dans `audite_fournisseur`.
+
+### 26. Lignes et colonnes masquées (résidu de filtre Excel) réaffichées automatiquement
+
+Une personne qui remplit le fichier applique parfois un filtre automatique pour ne voir qu'un
+sous-ensemble de produits, puis enregistre le fichier dans cet état : les lignes (voire une
+colonne) masquées contiennent souvent un produit bien réel, invisible à la relecture si elles
+ne sont pas réaffichées. `desocculte_lignes_et_colonnes` les réaffiche systématiquement, pour
+tous les fichiers — purement cosmétique, ne touche aucune donnée. Trouvé sur
+`2026 09 22 Base article groupement 5.xlsx` (577 lignes masquées) et
+`MDC_IMPORT_MARCHE...xlsx` (1 colonne, Désignation fournisseur du Fournisseur 1).
+
+### 27. Champs obligatoires / optionnels vides, signalés explicitement
+
+Nouvelle règle (`signale_champs_obligatoires_optionnels`), appliquée uniquement sur une ligne
+qui contient déjà au moins une donnée (une ligne totalement vide reste gérée par la règle n°11
+ci-dessous, candidate à la suppression) :
+- **Obligatoires** (orange, "bloque l'intégration") : Marché, Lot, Désignation de l'article,
+  Unité de référence, et par bloc Fournisseur : son nom, l'Unité de commande, le Prix de
+  référence, le Prix de commande.
+- **Optionnels** (gris, "conseillé") : par bloc Fournisseur : Conditionnement, Désignation
+  fournisseur, Référence produit.
+- Un bloc Fournisseur N entièrement vide n'est jamais signalé (il n'a simplement pas
+  participé à cette ligne — le bloc Fournisseur 2/3 n'existe que pour comparaison avec le 1).
+
+### 28. Même Désignation de l'article, mais Lot différent
+
+Deux lots distincts ne devraient pas décrire le même produit avec un texte de désignation
+rigoureusement identique — signe qu'il manque une information distinctive (variété, poids,
+origine, label...) dans au moins l'une des deux lignes. Fusionné dans
+`signale_designation_dupliquee` (même fonction que la règle n°2, juste un second signalement
+indépendant sur la même colonne — une ligne peut recevoir les deux à la fois).
+
+### 29. Rapport `.md` : catégories manquantes ou jamais remplies, corrigées
+
+En relisant les nouveaux signalements ci-dessus, plusieurs trous ont été trouvés dans
+`calcule_categories_rapport` (qui classe les commentaires posés sur la feuille par catégorie
+pour le rapport `.md` et l'app Streamlit) : le signalement "même Désignation, même
+fournisseur" (règle n°2 originale) n'apparaissait dans AUCUNE catégorie du rapport (invisible,
+bien que marqué dans le fichier) ; "Unité de référence vide" et "Valeurs manquantes"
+n'étaient, elles, jamais remplies du tout (aucun code ne produit le mot "manquant" dans un
+commentaire) — supprimées, remplacées par les nouvelles catégories n°27/28 ci-dessus, plus
+cohérentes. Un oubli similaire existait dans `app.py` (total de cellules marquées affiché dans
+l'app, pas mis à jour avec la nouvelle règle n°27) — corrigé aussi.
+
+Le rapport `.md` liste maintenant, tout en haut, les valeurs UNIQUES de Lot (triées par ordre
+croissant du numéro de lot) et de chaque Fournisseur (espaces de début/fin comptés, pour
+repérer une variante qui devrait être identique à une autre mais ne l'est pas exactement).
+
+### 30. Tolérance de ratio resserrée de 5 % à 2 %
+
+`TOLERANCE_RATIO` (utilisée partout pour confirmer qu'un ratio Prix commande ÷ Prix référence
+correspond à une quantité attendue) est passée de 5 % à 2 %, jugée trop permissive. Conséquence
+mesurée : 5 cellules en plus signalées sur `groupement 1` (des cas à 2-3,5 % d'écart,
+auparavant acceptés en silence), aucune perte de confirmation déjà posée ailleurs.
+
+### 31. Bug corrigé — doublon complet qui ignorait la Désignation
+
+`detecte_lignes_dupliquees` comparait toutes les colonnes SAUF la Désignation de l'article
+pour décider qu'une ligne entière est un doublon strict — deux produits réellement différents
+(ex: "SAUTE VEAU BIO" vs "SAUTE VEAU LR", même référence/conditionnement/prix) étaient peints
+en rouge vif à tort. Corrigé : la Désignation fait maintenant partie de la clé de
+comparaison — seules les VRAIES duplicatas restent en rouge vif ; la fonction séparée qui
+servait de redondance partielle à ce cas (`detecte_doublons_par_reference`) a été supprimée.
+
+### 32. Bug corrigé — "pièce"/"pièce" jamais utilisé comme nom de récipient réel
+
+Plusieurs motifs de conditionnement utilisent "pièce" comme marqueur de comptage générique
+("CARTON 6 PIECES DE 300 GR", "CARTON DE 40 PIECES") — ce n'est jamais un vrai récipient à
+reprendre tel quel dans l'unité de commande ou de référence. Corrigé à trois endroits
+différents du code (trouvé un par un, le même bug reproduit par plusieurs règles
+indépendantes) : la substitution directe de l'unité de commande, le cas "contenant à double
+imbrication" (CAS 3, règle n°10), et la détection de récipient imbriqué de premier niveau.
+
 ## Jeu de référence (pour TT-09)
 
-Les 5 fichiers de `pret_pour_audit/` (4x "Base article groupement" + "MDC_IMPORT_MARCHE")
-ont des résultats connus et stables (vérifiés à plusieurs reprises) :
+Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
+groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables, mesurés au
+2026-10-22 (après toutes les règles ci-dessus) :
 
 | Fichier | Lignes avec incohérence | Cellules marquées |
 |---|---|---|
-| Base article groupement 1 | 125 | 256 |
-| Base article groupement 2 | 247 | 427 |
-| Base article groupement 3 | 179 | 325 |
-| Base article groupement 4 | 148 | 302 |
-| MDC_IMPORT_MARCHE | 214 | 352 |
+| Base article groupement 1 | 146 | 797 |
+| Base article groupement 2 | 256 | 826 |
+| Base article groupement 3 | 195 | 991 |
+| Base article groupement 4 | 154 | 959 |
+| Base article groupement 5 | 196 | 870 |
+| Base article groupement commun | 690 | 1260 |
+| MDC_IMPORT_MARCHE | 210 | 643 |
 
 Ces chiffres servent de résultat attendu pour TT-09 (tests de non-régression) : si une
 future modification du code change ces totaux sans raison identifiée, c'est un signal
-de régression à investiguer.
+de régression à investiguer. Les écarts importants avec les anciens chiffres (ex: groupement
+1 : 256→797 cellules) reflètent l'accumulation des nombreuses règles n°21-32 ci-dessus
+(notamment n°27, qui à elle seule ajoute plusieurs centaines de signalements par fichier),
+pas une régression — voir le détail de chaque règle pour la justification.
 
 > Historique : les totaux de cellules marquées de groupement 1 et 2 sont passés de 247→255
 > et 419→427 le 2026-10-15, suite à l'ajout de la règle n°10 ci-dessus (contenant à double

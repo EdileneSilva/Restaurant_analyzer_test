@@ -6,6 +6,13 @@ règles déjà codées (`audit_geral.py`, `pretraitement.py`). **À faire relire
 par le métier** (critère d'acceptation de l'US-02) avant de considérer ce document comme
 définitif.
 
+> **Mis à jour le 2026-10-22** pour refléter les règles effectivement codées à ce jour
+> (`audit_geral.py`) : classification obligatoire/optionnel par colonne alignée sur
+> `signale_champs_obligatoires_optionnels`, vocabulaire de récipients très étendu pour
+> Unité de référence et Unité de commande, et distinction importante entre ce que l'outil
+> accepte en interne et ce que la base de données d'intégration reconnaît réellement (voir
+> `unites_commande_non_reconnues.md`).
+
 >Les fichiers `Base IANOR AGAPE 16 ...` sont
 > incomplets : colonne 6 absente, et texte légèrement différent sur les colonnes 4 et 5.
 > **Action à prévoir** : la colonne 6 ("Nombre de Pièces dans conditionnement") doit être
@@ -16,30 +23,56 @@ définitif.
 
 | # | Colonne | Type | Obligatoire | Valeurs autorisées | Remarque |
 |---|---|---|---|---|---|
-| 1 | Marché | Texte libre | Oui (100% rempli, TT-03) | — | Catégorie de marché (ex. "Epicerie") |
-| 2 | Lot | Texte libre | Oui (100% rempli, TT-03) | — | Numéro de lot, zéro ajouté devant 1-9 (règle codée dans `audit_geral.py`) |
-| 3 | Désignation de l'article | Texte libre | Oui (100% rempli, TT-03) | — | |
-| 4 | Unité de référence (BPU) | Choix limité | Oui | `KG`, `L`, `PC` | En-tête exact confirmé par `2026 09 22 Base article groupement 1.xlsx` : "Unité de référence\n(BPU)" — c'est le texte du code qui fait foi. Absent/différent dans les fichiers IANOR AGAPE, à corriger dans ces fichiers |
-| 5 | Poids à l'unité de référence | Nombre | Non (rempli seulement si Unité de référence = PC, cf. règle TT-03) | — | Idem : en-tête confirmé par le fichier de référence, différent dans les fichiers IANOR AGAPE ("Poids de la PC..."), à corriger dans ces fichiers |
+| 1 | Marché | Texte libre | Oui (100% rempli, TT-03 ; vide → orange, bloquant pour l'intégration) | — | Catégorie de marché (ex. "Epicerie") |
+| 2 | Lot | Texte libre | Oui (100% rempli, TT-03 ; vide → orange, bloquant pour l'intégration) | — | Numéro de lot, zéro ajouté devant 1-9 (règle codée dans `audit_geral.py`). Attention : deux lignes avec la même Désignation de l'article mais un Lot différent sont signalées (rose) — un lot distinct ne devrait pas décrire un produit avec un texte rigoureusement identique à un autre lot sans information distinctive supplémentaire |
+| 3 | Désignation de l'article | Texte libre | Oui (100% rempli, TT-03 ; vide → orange, bloquant pour l'intégration) | — | |
+| 4 | Unité de référence (BPU) | Choix limité | **Oui** — champ bloquant pour l'intégration si vide (`signale_champs_obligatoires_optionnels`, marqué en orange) | `KG`, `L`, `PC`, ou le nom d'un récipient intermédiaire quand le conditionnement décrit un double niveau d'emballage confirmé par le ratio des prix (ex: `BOUTEILLE`, `PACK`, `SACHET`, `CAGEOT`... — "CAS 3", voir `catalogue_erreurs.md`) | En-tête exact confirmé par `2026 09 22 Base article groupement 1.xlsx` : "Unité de référence\n(BPU)" — c'est le texte du code qui fait foi. Absent/différent dans les fichiers IANOR AGAPE, à corriger dans ces fichiers |
+| 5 | Poids à l'unité de référence | Nombre | Non (rempli seulement si Unité de référence = PC, cf. règle TT-03) — rempli AUTOMATIQUEMENT par le script quand le conditionnement et/ou la désignation fournisseur/article le confirment sans ambiguïté (couleur bleue, sans commentaire) | — | Idem : en-tête confirmé par le fichier de référence, différent dans les fichiers IANOR AGAPE ("Poids de la PC..."), à corriger dans ces fichiers |
 | 6 | Nombre de pièces dans conditionnement | Nombre | Non | — | **Confirmé présente dans le modèle de référence** (`2026 09 22 Base article groupement 1.xlsx`) — **absente** des 6 fichiers IANOR AGAPE, à ajouter dans ces fichiers avant de les considérer réellement au format cible. **Définition précisée** : nombre de pièces individuelles contenues dans UNE unité de référence (colonne 4) — indépendant de l'unité de commande. Exemple concret : "GOURDE POMME" (groupement 1, ligne 118), conditionnement "CARTON DE 8 PACKS DE 4 GOURDES DE 90 GR" — si Unité de référence = PACK (poids 0.36 kg = 4×90g), alors colonne 6 = 4 (gourdes par pack), PAS 8 (packs par carton, qui est juste le ratio implicite entre unité de référence et unité de commande, dérivable du prix, non stocké ici) |
 
 ## Bloc Fournisseur 1, 2, 3 (12 colonnes chacun, sauf Fournisseur 3 sans "Circuit court" — particularité déjà connue du modèle)
 
+**Obligatoire/optionnel ci-dessous = ce que vérifie `signale_champs_obligatoires_optionnels`
+(`audit_geral.py`)** : un bloc Fournisseur N entièrement vide n'est jamais signalé (il n'a
+simplement pas participé) ; dès qu'au moins une de ses 7 colonnes ci-dessous (nom,
+Conditionnement, Désignation fournisseur, Référence, Prix de référence, Unité de commande,
+Prix de commande) est renseignée, les champs obligatoires encore vides sont marqués en orange
+("bloque l'intégration"), les optionnels encore vides en gris ("conseillé").
+
 | Colonne (répétée x3) | Type | Obligatoire | Valeurs autorisées | Remarque |
 |---|---|---|---|---|
-| Fournisseur N (nom) | Texte libre | F1 : oui (100%) ; F2/F3 : non (jamais remplis dans l'échantillon, TT-03) | — | |
-| Conditionnement | Texte libre | Oui si Fournisseur N rempli | — | Format "N x quantité unité" ou avec nom de récipient (sac, seau, barquette...) — vocabulaire complet dans `MOTS_CONTENANT` (`audit_geral.py`) |
-| Désignation fournisseur | Texte libre | Oui si Fournisseur N rempli | — | |
-| Référence produit | Texte libre | Non (variable selon fichier, TT-03) | — | |
-| PRIX UNITE REFERENCE (BPU) KG/L/PC | Nombre (prix) | Oui si Fournisseur N rempli | — | |
-| UNITE COMMANDE | Choix limité | Oui si Fournisseur N rempli | `KG`, `L`, `PC`, ou nom de récipient (SAC, BARQUETTE...) | |
-| PRIX UNITE COMMANDE | Nombre (prix) | Oui si Fournisseur N rempli | — | |
+| Fournisseur N (nom) | Texte libre | **Oui** si le bloc a au moins une donnée (F1 : 100% ; F2/F3 : non remplis dans l'échantillon de référence, TT-03) | — | |
+| Conditionnement | Texte libre | **Optionnel** (conseillé) si le bloc a au moins une donnée | — | Format "N x quantité unité" ou avec nom de récipient (sac, seau, barquette, bac, coffret, plaquette, paquet, étui, bombe...) — vocabulaire complet dans `MOTS_CONTENANT` (`audit_geral.py`), régulièrement étendu au fil des fichiers réels |
+| Désignation fournisseur | Texte libre | **Optionnel** (conseillé) si le bloc a au moins une donnée | — | Peut rester vide par convention de fichier (ex: `MDC_IMPORT_MARCHE`, colonne entièrement vide) sans bloquer l'intégration |
+| Référence produit | Texte libre | **Optionnel** (conseillé) si le bloc a au moins une donnée (variable selon fichier, TT-03) | — | |
+| PRIX UNITE REFERENCE (BPU) KG/L/PC | Nombre (prix) | **Oui** si le bloc a au moins une donnée | — | Le script ne le recalcule JAMAIS automatiquement, même quand il est confiant dans son calcul : uniquement surligné en rose + commenté ("Prix de référence suggéré...") — une personne valide toujours elle-même un changement de prix |
+| UNITE COMMANDE | Choix limité | **Oui** si le bloc a au moins une donnée | `KG`, `L`, `PC`, ou nom de récipient (`SAC`, `BARQUETTE`, `CAGEOT`, `COFFRET`, `PLAQUETTE`, `ETUI`, `BOMBE`...), ou `LOT` (voir remarque) | Quand le conditionnement confirme un lot de N pièces sans récipient nommé, l'unité de commande ne garde que `LOT` — le nombre N est reporté en préfixe du Conditionnement ("LOT DE N, ...") plutôt que répété dans l'unité elle-même |
+| PRIX UNITE COMMANDE | Nombre (prix) | **Oui** si le bloc a au moins une donnée | — | Toujours considéré comme le prix réel par le script, jamais recalculé |
 | Local (X si local) | Choix limité | Non | `X` ou vide | |
 | Bio (X si bio) | Choix limité | Non | `X` ou vide | |
 | Circuit court | Choix limité | Non — **absent du bloc Fournisseur 3** (particularité confirmée du modèle) | `X` ou vide | |
 | Label | Texte libre | Non | — | Ex. observé : "LABEL ROUGE", "Le Porc Français VPF" |
 | Origine | Choix limité + exceptions | Non | `France`, `Union Européenne`, `Hors Union Européenne`, `Monde`, ou un pays reconnu (liste `PAYS_ETRANGERS_CONNUS` dans `pretraitement.py` : Espagne, Italie, Belgique, Chine, Royaume-Uni, Chili, Pérou, Irlande, Égypte, Asie, Allemagne, Portugal, Pays-Bas, Maroc) | Toute autre valeur est remplacée par "France" + commentaire de vérification (règle déjà codée) |
 | Indice I0 | Nombre | Non | — | |
+
+## ⚠️ Unité de commande acceptée par l'outil ≠ unité reconnue par la base de données
+
+L'outil (`audit_geral.py`) tolère un vocabulaire de récipients volontairement très large pour
+Unité de référence et Unité de commande (voir `MOTS_CONTENANT`), construit au fil des fichiers
+réels rencontrés. **Ce n'est pas la même chose que la liste des unités que la base de données
+d'intégration reconnaît réellement** : d'après l'échange avec l'équipe d'intégration, celle-ci
+n'accepte qu'une liste fermée de codes courts (ex. `C` pour Carton, `PAQ` pour Paquet, `U` pour
+Unité...), et toute valeur hors de cette liste devient `PIECE` par défaut lors de
+l'intégration — silencieusement, sans erreur bloquante.
+
+Une comparaison complète entre ce que les 7 fichiers de référence contiennent (Unité de
+commande, Unité de référence, et les mots de récipient détectés dans le Conditionnement) et
+cette liste fermée est tenue à jour dans
+[`unites_commande_non_reconnues.md`](unites_commande_non_reconnues.md) — 24 valeurs
+distinctes ne correspondent aujourd'hui à aucune unité reconnue (ex: `COLIS`, `CAGEOT`, `PU`,
+`FILET`, `BQT`, `PACK`, `COFFRET`...). Tant que ce mapping n'est pas décidé côté métier, le
+script ne transforme PAS automatiquement ces valeurs vers un code reconnu — il se contente de
+confirmer qu'elles correspondent bien au conditionnement/au ratio de prix.
 
 ## Bloc Allergènes (14 colonnes, une par allergène)
 
