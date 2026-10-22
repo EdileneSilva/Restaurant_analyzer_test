@@ -2,12 +2,12 @@
 
 Document de référence du format canonique ("Base article groupement" / "Feuille 1"),
 basé sur l'analyse exploratoire (TT-03, `analyse_exploratoire.md`) et croisé avec les
-règles déjà codées (`audit_geral.py`, `pretraitement.py`). **À faire relire et valider
+règles déjà codées (`audit_general.py`, `pretraitement.py`). **À faire relire et valider
 par le métier** (critère d'acceptation de l'US-02) avant de considérer ce document comme
 définitif.
 
 > **Mis à jour le 2026-10-22** pour refléter les règles effectivement codées à ce jour
-> (`audit_geral.py`) : classification obligatoire/optionnel par colonne alignée sur
+> (`audit_general.py`) : classification obligatoire/optionnel par colonne alignée sur
 > `signale_champs_obligatoires_optionnels`, vocabulaire de récipients très étendu pour
 > Unité de référence et Unité de commande, et distinction importante entre ce que l'outil
 > accepte en interne et ce que la base de données d'intégration reconnaît réellement (voir
@@ -24,7 +24,7 @@ définitif.
 | # | Colonne | Type | Obligatoire | Valeurs autorisées | Remarque |
 |---|---|---|---|---|---|
 | 1 | Marché | Texte libre | Oui (100% rempli, TT-03 ; vide → orange, bloquant pour l'intégration) | — | Catégorie de marché (ex. "Epicerie") |
-| 2 | Lot | Texte libre | Oui (100% rempli, TT-03 ; vide → orange, bloquant pour l'intégration) | — | Numéro de lot, zéro ajouté devant 1-9 (règle codée dans `audit_geral.py`). Attention : deux lignes avec la même Désignation de l'article mais un Lot différent sont signalées (rose) — un lot distinct ne devrait pas décrire un produit avec un texte rigoureusement identique à un autre lot sans information distinctive supplémentaire |
+| 2 | Lot | Texte libre | Oui (100% rempli, TT-03 ; vide → orange, bloquant pour l'intégration) | — | Numéro de lot, zéro ajouté devant 1-9 (règle codée dans `audit_general.py`). Attention : deux lignes avec la même Désignation de l'article mais un Lot différent sont signalées (rose) — un lot distinct ne devrait pas décrire un produit avec un texte rigoureusement identique à un autre lot sans information distinctive supplémentaire |
 | 3 | Désignation de l'article | Texte libre | Oui (100% rempli, TT-03 ; vide → orange, bloquant pour l'intégration) | — | |
 | 4 | Unité de référence (BPU) | Choix limité | **Oui** — champ bloquant pour l'intégration si vide (`signale_champs_obligatoires_optionnels`, marqué en orange) | `KG`, `L`, `PC`, ou le nom d'un récipient intermédiaire quand le conditionnement décrit un double niveau d'emballage confirmé par le ratio des prix (ex: `BOUTEILLE`, `PACK`, `SACHET`, `CAGEOT`... — "CAS 3", voir `catalogue_erreurs.md`) | En-tête exact confirmé par `2026 09 22 Base article groupement 1.xlsx` : "Unité de référence\n(BPU)" — c'est le texte du code qui fait foi. Absent/différent dans les fichiers IANOR AGAPE, à corriger dans ces fichiers |
 | 5 | Poids à l'unité de référence | Nombre | Non (rempli seulement si Unité de référence = PC, cf. règle TT-03) — rempli AUTOMATIQUEMENT par le script quand le conditionnement et/ou la désignation fournisseur/article le confirment sans ambiguïté (couleur bleue, sans commentaire) | — | Idem : en-tête confirmé par le fichier de référence, différent dans les fichiers IANOR AGAPE ("Poids de la PC..."), à corriger dans ces fichiers |
@@ -33,7 +33,7 @@ définitif.
 ## Bloc Fournisseur 1, 2, 3 (12 colonnes chacun, sauf Fournisseur 3 sans "Circuit court" — particularité déjà connue du modèle)
 
 **Obligatoire/optionnel ci-dessous = ce que vérifie `signale_champs_obligatoires_optionnels`
-(`audit_geral.py`)** : un bloc Fournisseur N entièrement vide n'est jamais signalé (il n'a
+(`audit_general.py`)** : un bloc Fournisseur N entièrement vide n'est jamais signalé (il n'a
 simplement pas participé) ; dès qu'au moins une de ses 7 colonnes ci-dessous (nom,
 Conditionnement, Désignation fournisseur, Référence, Prix de référence, Unité de commande,
 Prix de commande) est renseignée, les champs obligatoires encore vides sont marqués en orange
@@ -42,7 +42,7 @@ Prix de commande) est renseignée, les champs obligatoires encore vides sont mar
 | Colonne (répétée x3) | Type | Obligatoire | Valeurs autorisées | Remarque |
 |---|---|---|---|---|
 | Fournisseur N (nom) | Texte libre | **Oui** si le bloc a au moins une donnée (F1 : 100% ; F2/F3 : non remplis dans l'échantillon de référence, TT-03) | — | |
-| Conditionnement | Texte libre | **Optionnel** (conseillé) si le bloc a au moins une donnée | — | Format "N x quantité unité" ou avec nom de récipient (sac, seau, barquette, bac, coffret, plaquette, paquet, étui, bombe...) — vocabulaire complet dans `MOTS_CONTENANT` (`audit_geral.py`), régulièrement étendu au fil des fichiers réels |
+| Conditionnement | Texte libre | **Optionnel** (conseillé) si le bloc a au moins une donnée | — | Format "N x quantité unité" ou avec nom de récipient (sac, seau, barquette, bac, coffret, plaquette, paquet, étui, bombe...) — vocabulaire complet dans `MOTS_CONTENANT` (`audit_general.py`), régulièrement étendu au fil des fichiers réels |
 | Désignation fournisseur | Texte libre | **Optionnel** (conseillé) si le bloc a au moins une donnée | — | Peut rester vide par convention de fichier (ex: `MDC_IMPORT_MARCHE`, colonne entièrement vide) sans bloquer l'intégration |
 | Référence produit | Texte libre | **Optionnel** (conseillé) si le bloc a au moins une donnée (variable selon fichier, TT-03) | — | |
 | PRIX UNITE REFERENCE (BPU) KG/L/PC | Nombre (prix) | **Oui** si le bloc a au moins une donnée | — | Le script ne le recalcule JAMAIS automatiquement, même quand il est confiant dans son calcul : uniquement surligné en rose + commenté ("Prix de référence suggéré...") — une personne valide toujours elle-même un changement de prix |
@@ -57,7 +57,7 @@ Prix de commande) est renseignée, les champs obligatoires encore vides sont mar
 
 ## ⚠️ Unité de commande acceptée par l'outil ≠ unité reconnue par la base de données
 
-L'outil (`audit_geral.py`) tolère un vocabulaire de récipients volontairement très large pour
+L'outil (`audit_general.py`) tolère un vocabulaire de récipients volontairement très large pour
 Unité de référence et Unité de commande (voir `MOTS_CONTENANT`), construit au fil des fichiers
 réels rencontrés. **Ce n'est pas la même chose que la liste des unités que la base de données
 d'intégration reconnaît réellement** : d'après l'échange avec l'équipe d'intégration, celle-ci

@@ -2,9 +2,9 @@
 
 Un bloc par type d'erreur : description, exemple réel (extrait des fichiers canoniques
 confirmés dans `pret_pour_audit/`), gravité pressentie, et si une règle existe déjà dans
-`audit_geral.py` ou non. Base pour TT-06 (implémentation), TT-08 (seuils) et TT-09 (tests).
+`audit_general.py` ou non. Base pour TT-06 (implémentation), TT-08 (seuils) et TT-09 (tests).
 
-## Erreurs déjà couvertes par le code (`audit_geral.py`)
+## Erreurs déjà couvertes par le code (`audit_general.py`)
 
 ### 1. Lignes strictement dupliquées (`doublons`)
 - **Exemple réel** : `2026 09 22 Base article groupement 1.xlsx`, ligne 71, "MELANGE COUSCOUS" —
@@ -88,7 +88,7 @@ confirmés dans `pret_pour_audit/`), gravité pressentie, et si une règle exist
   pas une erreur à signaler à une personne.
 - **Couverte par le code** : oui (ajouté le 2026-10-15 — motif volontairement très strict,
   limité aux 8 lignes exactes ci-dessus sur l'ensemble des 11 fichiers testés, voir
-  `piece_carton_candidats` / `_traite_ligne_etendue_nucleo` dans `audit_geral.py`).
+  `piece_carton_candidats` / `_traite_ligne_etendue_nucleo` dans `audit_general.py`).
 
 ### 15. Bug de détection de colonne sur en-tête au texte différent (corrigé)
 - **Découvert en creusant le cas des œufs ci-dessous** : `localise_feuille_et_colonnes`
@@ -122,7 +122,7 @@ confirmés dans `pret_pour_audit/`), gravité pressentie, et si une règle exist
   copié du prix de commande sans division) ; information une fois corrigé.
 - **Couverte par le code** : oui (ajouté le 2026-10-15, motif strict limité à "CONTENANT DE N"
   sans aucun poids — 3 lignes concernées sur les 11 fichiers testés, voir
-  `RE_CONTENANT_SEUL_SANS_POIDS` dans `audit_geral.py`).
+  `RE_CONTENANT_SEUL_SANS_POIDS` dans `audit_general.py`).
 
 ### 17. Conditionnement vide pour un produit vendu au poids (CAS 2, "VRAC")
 - **Exemple réel** : `Base IANOR AGAPE 16 Viandes fraiches (1).xlsx` (29 lignes, 5-38) et
@@ -154,7 +154,7 @@ confirmés dans `pret_pour_audit/`), gravité pressentie, et si une règle exist
   corrigée automatiquement — contrairement à `pretraitement.traite_origine`, qui lui réécrit
   en 'France').
 - **Couverte par le code** : oui (ajouté le 2026-10-16, `verifie_origine` dans
-  `audit_geral.py` — liste de pays volontairement élargie par rapport à celle de
+  `audit_general.py` — liste de pays volontairement élargie par rapport à celle de
   `pretraitement.py`, observée directement dans les fichiers réels).
 
 ### 20. Poids à l'unité de référence écrit en texte libre au lieu d'un nombre
@@ -233,7 +233,7 @@ nouvelle valeur (couleur bleue). **Décision changée** : même un recalcul conf
 jamais appliqué automatiquement — seulement surligné en rose + commenté ("Prix de référence
 suggéré : ... — à vérifier, non modifié automatiquement"), exactement comme une incohérence.
 Une personne valide toujours elle-même un changement de prix. Modifié à la fois dans
-`audit_geral.py` et dans le moteur partagé `first_scripts/first_attempt_v2_prototype.py`.
+`audit_general.py` et dans le moteur partagé `first_scripts/first_attempt_v2_prototype.py`.
 
 ### 23. Vocabulaire de récipients très étendu
 

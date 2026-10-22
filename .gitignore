@@ -5,3 +5,4 @@ venv/
 __pycache__/
 *.pyc
 /transformed_files
+/commented_files

@@ -5,7 +5,7 @@ Application de démonstration (Streamlit) — Audit de cohérence unités/prix
 Dépose un ou plusieurs fichiers .xlsx — déjà au format canonique ("Base article
 groupement N", "MDC_IMPORT_MARCHE"...), ou dans un format reconnu (REGAL, famille
 GRADA, ancien .xls) qui sera converti automatiquement — lance l'audit
-(exactement la même logique que audit_geral.py), et permet de télécharger les
+(exactement la même logique que audit_general.py), et permet de télécharger les
 fichiers audités + les rapports — sans rien écrire sur le serveur, tout se fait
 en mémoire.
 """
@@ -14,7 +14,7 @@ import io
 
 import streamlit as st
 
-import audit_geral as audit
+import audit_general as audit
 import pretraitement_auto
 
 st.set_page_config(page_title="Audit BPU — démo", page_icon="📋", layout="wide")

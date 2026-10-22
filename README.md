@@ -9,9 +9,9 @@ fournisseurs qui ne sont pas déjà dans ce format.
 - `app.py` — application Streamlit : dépôt de fichier(s), détection + transformation
   automatique si besoin, puis audit. Rien n'est écrit sur le serveur, tout se fait en
   mémoire.
-- `audit_geral.py` — le script d'audit lui-même (logique de cohérence unités/prix). Peut
+- `audit_general.py` — le script d'audit lui-même (logique de cohérence unités/prix). Peut
 
-  aussi être lancé en CLI (`python audit_geral.py`) : lit tous les `.xlsx` de
+  aussi être lancé en CLI (`python audit_general.py`) : lit tous les `.xlsx` de
   `pret_pour_audit/` et écrit les fichiers audités + rapports dans `transformed_files/`.
 - `pretraitement.py` — transforme les catalogues au format REGAL vers le format canonique.
 - `pretraitement_grada.py` — transforme les catalogues de la famille GRADA (AGRICOURT, VDR,
@@ -20,7 +20,7 @@ fournisseurs qui ne sont pas déjà dans ce format.
   automatiquement le format d'un fichier déposé (canonique / REGAL / GRADA / `.xls`
   ancien à convertir / non reconnu) et applique le bon traitement.
 - `first_scripts/first_attempt_v2_prototype.py` — règles de cohérence déjà validées,
-  réutilisées telles quelles par `audit_geral.py` (import direct, ne pas supprimer).
+  réutilisées telles quelles par `audit_general.py` (import direct, ne pas supprimer).
 
 ## Dossiers de données
 
@@ -31,10 +31,10 @@ fournisseurs qui ne sont pas déjà dans ce format.
   automatiquement (nécessitent un nouveau script de transformation). Une fois le script
   écrit (ou via `pretraitement_auto.py`), le résultat transformé va dans
   `pret_pour_audit/`.
-- `pret_pour_audit/` — dossier d'entrée du mode CLI de `audit_geral.py`
+- `pret_pour_audit/` — dossier d'entrée du mode CLI de `audit_general.py`
   (`DOSSIER_ENTREE`) : uniquement des fichiers déjà au format canonique, prêts à être
-  audités directement (`python audit_geral.py`).
-- `transformed_files/` — sortie du mode CLI de `audit_geral.py` (fichiers audités +
+  audités directement (`python audit_general.py`).
+- `transformed_files/` — sortie du mode CLI de `audit_general.py` (fichiers audités +
   rapports).
 - `useful_stuff/` — matériel de référence (pas des échantillons à auditer) : documents et
   modèles utilisés par l'ancienne référente du traitement manuel, pouvant être réutilisés.
@@ -47,7 +47,7 @@ Le détail fichier par fichier (source, date de réception, statut, anonymisatio
 - [`format_cible.md`](format_cible.md) — schéma détaillé du format canonique, colonne par
   colonne (obligatoire/optionnel, valeurs autorisées).
 - [`catalogue_erreurs.md`](catalogue_erreurs.md) — catalogue des règles de cohérence codées
-  dans `audit_geral.py`, avec un exemple réel par règle, et le jeu de résultats de référence
+  dans `audit_general.py`, avec un exemple réel par règle, et le jeu de résultats de référence
   (non-régression) sur les 7 fichiers de `pret_pour_audit/`.
 - [`unites_commande_non_reconnues.md`](unites_commande_non_reconnues.md) — écart entre les
   unités tolérées par l'outil et celles réellement acceptées par la base de données

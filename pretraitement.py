@@ -1,7 +1,7 @@
 """
 Prétraitement — transforme des fichiers "en vrac" (messy_files/) dans le même
 format que ceux de raw_data/, pour qu'ils puissent ensuite être audités par
-audit_geral.py (qui ne dépend que du contenu des en-têtes, pas du nom de la
+audit_general.py (qui ne dépend que du contenu des en-têtes, pas du nom de la
 feuille ni de la position absolue des colonnes).
 
 Pour l'instant : seul le catalogue au format REGAL est pris en charge
@@ -529,7 +529,7 @@ def ecrit_classeur_canonique(lignes, chemin_sortie, nom_feuille):
         _ecrit(ws_dst, r, COL_DESIGNATION, ligne["designation"])
         cel_unite_ref = _ecrit(ws_dst, r, COL_UNITE_REF, ligne["unite_ref"])
         if ligne["commentaire_unite"]:
-            cel_unite_ref.comment = Comment(ligne["commentaire_unite"], "audit_geral")
+            cel_unite_ref.comment = Comment(ligne["commentaire_unite"], "audit_general")
         if ligne["poids"] is not None:
             _ecrit(ws_dst, r, COL_POIDS_REF, ligne["poids"])
         _ecrit(ws_dst, r, COL_FOURNISSEUR, ligne["fournisseur"])
@@ -546,7 +546,7 @@ def ecrit_classeur_canonique(lignes, chemin_sortie, nom_feuille):
         cel_origine = _ecrit(ws_dst, r, COL_ORIGINE, ligne["origine"])
         if ligne["commentaire_origine"]:
             cel_origine.fill = COULEUR_ORIGINE_INCERTAINE
-            cel_origine.comment = Comment(ligne["commentaire_origine"], "audit_geral")
+            cel_origine.comment = Comment(ligne["commentaire_origine"], "audit_general")
 
         for j, nom in enumerate(ALLERGENES):
             _ecrit(ws_dst, r, COL_GLUTEN + j, ligne["allergenes"][nom])

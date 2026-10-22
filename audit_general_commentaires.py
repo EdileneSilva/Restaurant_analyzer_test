@@ -1,39 +1,24 @@
 """
-Audit de cohérence unités/prix — GÉNÉRALISÉ à tous les fichiers "Base article"
+Audit de cohérence unités/prix — VERSION "COMMENTAIRES SEULEMENT"
 ================================================================================
 
-Ce script traite automatiquement TOUS les fichiers .xlsx du dossier pret_pour_audit/, quel que
-soit leur format exact (nombre de colonnes, présence ou non d'une colonne "Circuit court",
-1, 2 ou 3 blocs Fournisseur remplis...) — les colonnes sont repérées par leur EN-TÊTE
-(texte), pas par leur numéro, ce qui permet de traiter aussi bien les fichiers
-"Base article groupement N" que le fichier "MDC_IMPORT_MARCHE" sans réglage manuel.
+Variante de `audit_general.py` demandée pour une version du fichier où AUCUNE case n'est
+modifiée, à deux exceptions près : le "X" de Bio et le nom du label (ex: "LABEL ROUGE")
+quand ils sont trouvés dans le texte. Tout le reste — même ce qui, dans `audit_general.py`,
+était rempli automatiquement avec confiance (Unité de référence, Unité de commande, Poids à
+l'unité de référence, Nombre de pièces, Marché/Lot recopiés, numéro de Lot avec le zéro
+devant...) — n'est ici que surligné avec un commentaire expliquant simplement ce qu'on pense
+que la valeur devrait être. Les commentaires sont volontairement écrits en langage courant,
+sans vocabulaire technique (pas de "ratio", de "÷", de formule) : compréhensibles par
+quelqu'un qui ne travaille pas avec ce fichier au quotidien.
 
-Ce que fait ce script, pour chaque produit et chaque fournisseur rempli :
-  - vérifie que le ratio Prix de commande ÷ Prix de référence (BPU) correspond à ce que
-    décrit le Conditionnement (multiplicateur, récipient nommé — sachet/carton/barquette/
-    cageot/bouteille/pièce...) ;
-  - normalise la lecture des unités (kg/kilo/kilogramme, l/litre, g/gr/gramme, ml/cl...) et
-    des récipients, quelle que soit la façon dont la personne les a écrits ;
-  - repère les lignes strictement dupliquées (surlignées en ROUGE, 2e occurrence et
-    suivantes) ;
-  - repère les références produit en double avec le même prix (surlignées en ROSE) ;
-  - repère les valeurs manquantes (prix, unité de référence) ;
-  - ne fait JAMAIS de correction automatique du prix ou de l'unité — il se contente de
-    surligner la cellule et d'écrire un commentaire expliquant l'incohérence. Une personne
-    doit ensuite valider ; ce script est une pré-analyse pour accélérer ce travail, pas une
-    décision finale.
-
-Les deux SEULES valeurs que ce script écrit réellement (jamais un prix) :
-  1. La colonne Lot : un zéro est ajouté devant les numéros à un seul chiffre (1-9 -> 01-09).
-  2. Le Poids à l'unité de référence, UNIQUEMENT quand elle est vide, que l'unité de
-     référence est à la pièce ('PC'/'pièce'/'unité'), que le conditionnement identifie sans
-     ambiguïté ce qu'est une pièce et son poids/volume, et que le ratio des prix confirme le
-     nombre total de pièces.
+Lit les mêmes fichiers que `audit_general.py` (dossier `pret_pour_audit/`), mais écrit dans un
+dossier séparé (`commented_files/`) pour ne jamais mélanger les deux versions.
 
 Usage :
-    python audit_geral.py
-    (lit tous les .xlsx de pret_pour_audit/, écrit les fichiers audités + rapports dans
-    transformed_files/)
+    python audit_general_commentaires.py
+    (lit tous les .xlsx de pret_pour_audit/, écrit les fichiers commentés + rapports dans
+    commented_files/)
 """
 
 import os
@@ -55,7 +40,7 @@ from openpyxl.styles import PatternFill, Font, Alignment
 
 DOSSIER_PROJET = os.path.dirname(os.path.abspath(__file__))
 DOSSIER_ENTREE = os.path.join(DOSSIER_PROJET, "pret_pour_audit")
-DOSSIER_SORTIE = os.path.join(DOSSIER_PROJET, "transformed_files")
+DOSSIER_SORTIE = os.path.join(DOSSIER_PROJET, "commented_files")
 
 # ============================================================================
 # EXTENSION DE VOCABULAIRE — récipients, unités et fautes de frappe fréquentes,
@@ -1968,49 +1953,45 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
             and unite_ref and motor.normalise_texte(unite_ref) in ("kg", "l", "litre")
             and unite_cmd and motor.normalise_texte(unite_cmd) == motor.normalise_texte(unite_ref)
             and prix_ref == prix_cmd):
-        cel_cond = ws.cell(row=ligne, column=fournisseur["cond"])
-        cel_cond.value = "VRAC"
-        cel_cond.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
-                                     end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
-        # Pas de commentaire : la couleur seule suffit (cellule vide remplie automatiquement).
+        # Rien n'est écrit dans cette version : juste un commentaire simple expliquant ce qu'on
+        # aurait mis.
+        marque(ws.cell(row=ligne, column=fournisseur["cond"]), motor.COULEUR_UNITE_TRANSFORMEE,
+               fournisseur["nom"],
+               "Le conditionnement est vide, mais tout indique que ce produit est vendu au "
+               "poids, sans emballage fixe (le prix d'achat et le prix de référence sont "
+               "identiques) : on pourrait écrire 'VRAC' ici.")
         total += 1
         conditionnement = "VRAC"
 
     # Référence de plage de cellules Excel ('H33:H66') collée par erreur au milieu du
-    # Conditionnement : aucune ambiguïté possible (ce n'est jamais du texte produit légitime),
-    # donc on corrige directement la cellule, contrairement au reste du Conditionnement qui
-    # n'est lui jamais modifié.
+    # Conditionnement : repéré, mais pas corrigé dans cette version (rien n'est écrit).
     if conditionnement:
         conditionnement_sans_plage, corrige = retire_plage_cellule_collee(conditionnement)
         if corrige:
-            cel_cond = ws.cell(row=ligne, column=fournisseur["cond"])
-            cel_cond.value = conditionnement_sans_plage
-            cel_cond.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
-                                         end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
-            texte = (
-                f"Conditionnement corrigé : une référence de plage de cellules Excel "
-                f"('{conditionnement}' contenait une plage du type 'H33:H66') semble avoir été "
-                "collée par erreur au milieu du texte. Valeur nettoyée automatiquement — "
-                "vérifiez qu'elle est bien correcte.")
-            if cel_cond.comment:
-                cel_cond.comment.text = cel_cond.comment.text + "\n\n" + texte
-            else:
-                cel_cond.comment = Comment(texte, AUTEUR_COMMENTAIRE)
+            marque(ws.cell(row=ligne, column=fournisseur["cond"]), motor.COULEUR_A_VERIFIER,
+                   fournisseur["nom"],
+                   "Il semble y avoir un morceau de cellules Excel collé par erreur au milieu "
+                   f"du texte (quelque chose comme 'H33:H66'). Sans ça, le texte serait : "
+                   f"'{conditionnement_sans_plage}'.")
             total += 1
             conditionnement = conditionnement_sans_plage
 
     # Faute de frappe sur un mot de contenant (ex: 'BARQUETE' au lieu de 'BARQUETTE') :
     # seulement quand l'analyse normale échouerait sinon (pas de faux positif sur un mot qui
-    # se trouve juste être proche d'un contenant connu par coïncidence). Correction purement
-    # orthographique, sans ambiguïté sur le fond — appliquée directement et silencieusement,
-    # sans couleur ni commentaire.
+    # se trouve juste être proche d'un contenant connu par coïncidence). Repéré, mais rien
+    # n'est écrit dans cette version.
     if conditionnement and unite_ref:
         conditionnement_propre = nettoie_conditionnement(conditionnement)
         if (piece_carton_candidats(unite_ref, conditionnement_propre) is None
                 and determine_base_et_quantite(conditionnement_propre) is None):
             conditionnement_corrige, typo = corrige_faute_frappe_contenant(conditionnement_propre)
             if typo:
-                ws.cell(row=ligne, column=fournisseur["cond"]).value = conditionnement_corrige
+                mot_original, mot_corrige = typo
+                marque(ws.cell(row=ligne, column=fournisseur["cond"]), motor.COULEUR_A_VERIFIER,
+                       fournisseur["nom"],
+                       f"Le mot '{mot_original}' ressemble à une faute de frappe pour "
+                       f"'{mot_corrige}' — à vérifier.")
+                total += 1
                 conditionnement = conditionnement_corrige
 
     # Cellule vide : la couleur seule suffit, pas de commentaire (allège le fichier).
@@ -2050,46 +2031,33 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
         base_final_d = motor.normalise_texte(d_final) if d_final else None
 
         if col_poids_ref and base_final_d in ("kg", "l", "litre"):
-            # L'unité de référence est en kg/L (qu'elle l'ait toujours été, ou qu'elle vienne
-            # de le devenir) : la colonne Poids à l'unité de référence ne sert QUE pour les
-            # unités à la pièce (poids d'UNE pièce) — si elle contient encore une valeur, elle
-            # n'a plus de sens, donc on la vide. Pas de couleur ni de commentaire : conséquence
-            # mécanique du passage en kg/L, pas une incohérence en soi.
+            # L'unité de référence semble être en kg/L — la colonne Poids à l'unité de
+            # référence ne sert QUE pour les unités à la pièce. Rien n'est vidé dans cette
+            # version (on ne touche à aucune cellule) : juste un repère si une valeur y
+            # traîne déjà et ne semble plus avoir de sens.
             cel_e = ws.cell(row=ligne, column=col_poids_ref)
             if cel_e.value is not None:
-                cel_e.value = None
+                marque(cel_e, motor.COULEUR_A_VERIFIER, fournisseur["nom"],
+                       "Le produit semble être vendu au kilo ou au litre — la valeur ici ne "
+                       "sert normalement que pour un produit vendu à la pièce.")
+                total += 1
         else:
-            explication_e = getattr(resultat, "explication_e", None)
             if col_poids_ref and resultat.nouveau_e not in ("GARDER", "VIDER", None):
-                if not explication_e:
-                    # motor.traite_ligne renseigne parfois nouveau_e directement (ex:
-                    # l'exception K = M, "comparaison volontaire à la pièce") sans poser
-                    # explication_e (propre à audit_geral) — on en synthétise une à partir de
-                    # ce qu'on sait plutôt que de remplir la case sans aucune explication
-                    # visible.
-                    explication_e = (
-                        f"Poids à l'unité de référence renseigné à {resultat.nouveau_e} kg, "
-                        f"déduit du Conditionnement ('{conditionnement}'), de la Désignation "
-                        f"fournisseur ('{desig_fourn}') ou de la Désignation de l'article "
-                        f"('{designation}'). " + (resultat.commentaire_d or ""))
                 cel_e = ws.cell(row=ligne, column=col_poids_ref)
                 if cel_e.value is None:
-                    cel_e.value = resultat.nouveau_e
-                    cel_e.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
-                                              end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
-                    # Pas de commentaire ici (juste la couleur) : la couleur seule suffit à
-                    # signaler que la case a été remplie, un commentaire par ligne alourdit le
-                    # fichier pour rien.
+                    marque(cel_e, motor.COULEUR_UNITE_TRANSFORMEE, fournisseur["nom"],
+                           f"Le poids d'une pièce semble être {resultat.nouveau_e} kg, d'après "
+                           "l'emballage (conditionnement) ou la désignation du fournisseur/de "
+                           "l'article.")
                     total += 1
 
         nouveau_f = getattr(resultat, "nouveau_f", None)
         if col_nb_pieces and nouveau_f is not None:
             cel_f = ws.cell(row=ligne, column=col_nb_pieces)
             if cel_f.value is None:
-                cel_f.value = nouveau_f
-                cel_f.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
-                                          end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
-                # Pas de commentaire : la couleur seule suffit (allège le fichier).
+                marque(cel_f, motor.COULEUR_UNITE_TRANSFORMEE, fournisseur["nom"],
+                       f"Le nombre de pièces semble être {nouveau_f}, d'après l'emballage "
+                       "(conditionnement).")
                 total += 1
 
         d_differe = (resultat.nouveau_d is not None
@@ -2099,66 +2067,71 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
         k_differe = (resultat.nouveau_k is not None
                      and abs(resultat.nouveau_k - prix_ref) > 0.0005)
 
-        # Écrit toujours la valeur normalisée (D en KG/L/PC, L quand il est fiable) — même une
-        # simple normalisation silencieuse (kg -> KG) est appliquée. Seule la mise en évidence
-        # (couleur + commentaire) dépend d'un changement réel. Et si aucune règle n'a eu de
-        # raison de toucher D/L, on force quand même la casse en MAJUSCULES (jamais marqué, ce
-        # n'est qu'une question de casse).
-        #
-        # Le prix de référence (K), lui, n'est JAMAIS écrit automatiquement, même quand le
-        # script est confiant dans son calcul — uniquement surligné (couleur) et commenté
-        # (resultat.commentaire_k, ci-dessous), exactement comme les incohérences : une
-        # personne valide toujours le changement de prix elle-même.
-        if resultat.nouveau_d is not None:
-            valeur_d = resultat.nouveau_d.upper() if isinstance(resultat.nouveau_d, str) else resultat.nouveau_d
-            ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]).value = valeur_d
-        else:
-            maj = majuscule_si_inchangee(unite_ref)
-            if maj:
-                ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]).value = maj
-        if resultat.nouveau_l is not None:
-            valeur_l = resultat.nouveau_l.upper() if isinstance(resultat.nouveau_l, str) else resultat.nouveau_l
-            m_lot = RE_LOT_DE_N_UNITE_CMD.match(valeur_l) if isinstance(valeur_l, str) else None
+        # VERSION "COMMENTAIRES SEULEMENT" : aucune cellule D/K/L n'est modifiée, même quand
+        # le script est confiant. On se contente d'un commentaire simple, en langage courant,
+        # expliquant ce qu'on pense que la valeur devrait être.
+        if d_differe:
+            marque(ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]),
+                   motor.COULEUR_UNITE_TRANSFORMEE, fournisseur["nom"],
+                   f"D'après la comparaison des prix et l'emballage, l'unité de référence "
+                   f"semble plutôt être '{resultat.nouveau_d}' (ici : '{unite_ref}').")
+            total += 1
+        if l_differe:
+            # Cas particulier 'LOT DE N' : expliqué directement dans le Conditionnement
+            # (jamais écrit, juste commenté), pas la peine de le répéter sur l'unité de
+            # commande avec le même niveau de détail.
+            valeur_l_affichee = resultat.nouveau_l.upper() if isinstance(resultat.nouveau_l, str) else resultat.nouveau_l
+            m_lot = RE_LOT_DE_N_UNITE_CMD.match(valeur_l_affichee) if isinstance(valeur_l_affichee, str) else None
             if m_lot:
-                # 'LOT' seul en unité de commande — le nombre n'est pas vraiment une unité, il
-                # va plutôt au début du Conditionnement (sauf s'il y est déjà, sous une forme ou
-                # une autre : pas la peine de répéter).
                 n_lot = m_lot.group(1)
-                valeur_l = "LOT"
-                cel_cond = ws.cell(row=ligne, column=fournisseur["cond"])
-                texte_cond_actuel = cel_cond.value
+                texte_cond_actuel = ws.cell(row=ligne, column=fournisseur["cond"]).value
                 if not (texte_cond_actuel and re.search(r"\blot\b", str(texte_cond_actuel), re.I)):
-                    cel_cond.value = (f"LOT DE {n_lot}, {texte_cond_actuel}" if texte_cond_actuel
-                                       else f"LOT DE {n_lot}")
-                    marque(cel_cond, motor.COULEUR_UNITE_TRANSFORMEE, fournisseur["nom"],
-                           f"'LOT DE {n_lot}' ajouté au début du Conditionnement : l'unité de "
-                           "commande ne garde que 'LOT', le nombre est précisé ici pour ne pas "
-                           "perdre l'information.")
+                    marque(ws.cell(row=ligne, column=fournisseur["cond"]),
+                           motor.COULEUR_UNITE_TRANSFORMEE, fournisseur["nom"],
+                           f"On dirait que ce produit se commande par lot de {n_lot} pièces.")
                     total += 1
-            ws.cell(row=ligne, column=fournisseur["unite_cmd"]).value = valeur_l
-        else:
-            maj = majuscule_si_inchangee(unite_cmd)
-            if maj:
-                ws.cell(row=ligne, column=fournisseur["unite_cmd"]).value = maj
+                marque(ws.cell(row=ligne, column=fournisseur["unite_cmd"]),
+                       motor.COULEUR_UNITE_TRANSFORMEE, fournisseur["nom"],
+                       f"L'unité de commande semble être un lot de {n_lot} pièces (ici : "
+                       f"'{unite_cmd}').")
+            else:
+                marque(ws.cell(row=ligne, column=fournisseur["unite_cmd"]),
+                       motor.COULEUR_UNITE_TRANSFORMEE, fournisseur["nom"],
+                       f"D'après l'emballage, l'unité de commande semble plutôt être "
+                       f"'{resultat.nouveau_l}' (ici : '{unite_cmd}').")
+            total += 1
 
         if resultat.couleur_d in COULEURS_INCOHERENCE and resultat.commentaire_d and (
-                d_differe or resultat.nouveau_d is None):
-            marque(ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]), resultat.couleur_d,
-                   fournisseur["nom"], resultat.commentaire_d)
+                not d_differe) and resultat.nouveau_d is None:
+            marque(ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]),
+                   motor.COULEUR_A_VERIFIER, fournisseur["nom"],
+                   f"L'unité de référence ('{unite_ref}') ne semble pas correspondre à "
+                   "l'emballage ou au prix — à vérifier à la main.")
             total += 1
-        if resultat.couleur_k in COULEURS_INCOHERENCE and resultat.commentaire_k and (
-                k_differe or resultat.nouveau_k is None):
-            marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]), resultat.couleur_k,
-                   fournisseur["nom"], resultat.commentaire_k)
+        if k_differe:
+            marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]),
+                   motor.COULEUR_RATIO_SUSPECT, fournisseur["nom"],
+                   f"D'après la comparaison des prix, le prix de référence semble plutôt "
+                   f"devoir être {round(resultat.nouveau_k, 4)}€ (ici : {prix_ref}€) — à "
+                   "vérifier avant de changer quoi que ce soit.")
             total += 1
-        if resultat.couleur_l in COULEURS_INCOHERENCE and resultat.commentaire_l and (
-                l_differe or resultat.nouveau_l is None):
-            marque(ws.cell(row=ligne, column=fournisseur["unite_cmd"]), resultat.couleur_l,
-                   fournisseur["nom"], resultat.commentaire_l)
+        elif resultat.couleur_k in COULEURS_INCOHERENCE and resultat.commentaire_k:
+            marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]),
+                   motor.COULEUR_A_VERIFIER, fournisseur["nom"],
+                   f"Le prix de référence ('{prix_ref}') ne semble pas correspondre à "
+                   "l'emballage ou au prix de commande — à vérifier à la main.")
+            total += 1
+        if (not l_differe) and resultat.couleur_l in COULEURS_INCOHERENCE and resultat.commentaire_l:
+            marque(ws.cell(row=ligne, column=fournisseur["unite_cmd"]),
+                   motor.COULEUR_A_VERIFIER, fournisseur["nom"],
+                   f"L'unité de commande ('{unite_cmd}') ne semble pas correspondre à "
+                   "l'emballage — à vérifier à la main.")
             total += 1
         if resultat.couleur_m in COULEURS_INCOHERENCE and resultat.commentaire_m:
-            marque(ws.cell(row=ligne, column=fournisseur["prix_cmd"]), resultat.couleur_m,
-                   fournisseur["nom"], resultat.commentaire_m)
+            marque(ws.cell(row=ligne, column=fournisseur["prix_cmd"]),
+                   motor.COULEUR_A_VERIFIER, fournisseur["nom"],
+                   f"Le prix de commande ('{prix_cmd}') ne semble pas correspondre à "
+                   "l'emballage ou au prix de référence — à vérifier à la main.")
             total += 1
 
         # Signalement des prix "outliers" (comparés à la médiane des autres lignes/catégories)
@@ -2196,15 +2169,7 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
         #                 total += signale_prix_outlier(
         #                     stats_categorie, 5, f"celui de la catégorie '{lot_valor}'",
         #                     f", catégorie '{lot_valor}'")
-    else:
-        # Prix manquant(s) : aucune des règles ci-dessus n'a pu s'exécuter, mais la casse de
-        # D/L doit quand même être forcée en MAJUSCULES (jamais marqué).
-        maj_d = majuscule_si_inchangee(unite_ref)
-        if maj_d:
-            ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]).value = maj_d
-        maj_l = majuscule_si_inchangee(unite_cmd)
-        if maj_l:
-            ws.cell(row=ligne, column=fournisseur["unite_cmd"]).value = maj_l
+    # else : prix manquant(s), aucune analyse possible — rien à faire ni à signaler ici.
 
     # Si l'unité de commande vient d'être corrigée automatiquement (mot repris du
     # conditionnement, contenant à double imbrication, 'LOT DE N'...), valider contre la
@@ -2227,12 +2192,13 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
             abrege = motor.CONTENANT_ABREGE.get(mot_trouve, mot_trouve.upper()) if mot_trouve else None
             cel_l = ws.cell(row=ligne, column=fournisseur["unite_cmd"])
             if abrege and motor.normalise_texte(abrege) != base_cmd_actuelle:
-                cel_l.value = abrege
                 marque(cel_l, motor.COULEUR_UNITE_TRANSFORMEE, fournisseur["nom"],
-                       f"Unité de commande changée en '{abrege}' d'après le conditionnement "
-                       f"('{conditionnement}').")
+                       f"D'après l'emballage, l'unité de commande semble plutôt être "
+                       f"'{abrege}'.")
             else:
-                marque(cel_l, motor.COULEUR_COMMANDE_SUSPECTE, fournisseur["nom"], message)
+                marque(cel_l, motor.COULEUR_A_VERIFIER, fournisseur["nom"],
+                       "L'unité de commande ne semble pas correspondre à l'emballage — à "
+                       "vérifier à la main.")
             total += 1
 
     col_origine = fournisseur.get("origine")
@@ -2553,20 +2519,25 @@ def comble_marche_lot(ws, ws_valeurs, ligne_debut, col_designation, col_marche, 
 
         if marche_ok and lot_ok:
             if col_marche and marche_vide:
-                ws.cell(row=ligne, column=col_marche).value = marche_dessus
+                marque(ws.cell(row=ligne, column=col_marche), motor.COULEUR_UNITE_TRANSFORMEE,
+                       None,
+                       f"Les lignes juste au-dessus et en-dessous ont le même Marché "
+                       f"('{marche_dessus}') — celui-ci devrait sans doute être le même.")
             if col_lot and lot_vide:
-                ws.cell(row=ligne, column=col_lot).value = lot_dessus
+                marque(ws.cell(row=ligne, column=col_lot), motor.COULEUR_UNITE_TRANSFORMEE,
+                       None,
+                       f"Les lignes juste au-dessus et en-dessous ont le même Lot "
+                       f"('{lot_dessus}') — celui-ci devrait sans doute être le même.")
             total_rempli += 1
         else:
-            # Pas de commentaire : la couleur seule suffit (cellule vide à préciser).
             if col_marche and marche_vide:
-                cel = ws.cell(row=ligne, column=col_marche)
-                cel.fill = PatternFill(start_color=motor.COULEUR_A_VERIFIER,
-                                        end_color=motor.COULEUR_A_VERIFIER, fill_type="solid")
+                marque(ws.cell(row=ligne, column=col_marche), motor.COULEUR_A_VERIFIER, None,
+                       "Le Marché est vide, et les lignes voisines ne permettent pas de "
+                       "deviner lequel mettre — à préciser à la main.")
             if col_lot and lot_vide:
-                cel = ws.cell(row=ligne, column=col_lot)
-                cel.fill = PatternFill(start_color=motor.COULEUR_A_VERIFIER,
-                                        end_color=motor.COULEUR_A_VERIFIER, fill_type="solid")
+                marque(ws.cell(row=ligne, column=col_lot), motor.COULEUR_A_VERIFIER, None,
+                       "Le Lot est vide, et les lignes voisines ne permettent pas de deviner "
+                       "lequel mettre — à préciser à la main.")
             total_signale += 1
     return total_rempli, total_signale
 
@@ -2617,7 +2588,9 @@ def normalise_lots(ws, ws_valeurs, ligne_debut, col_lot):
         valeur = ws_valeurs.cell(row=ligne, column=col_lot).value
         nouvelle_valeur = motor.normalise_numero_lot(valeur)
         if nouvelle_valeur != valeur:
-            ws.cell(row=ligne, column=col_lot).value = nouvelle_valeur
+            marque(ws.cell(row=ligne, column=col_lot), motor.COULEUR_UNITE_TRANSFORMEE, None,
+                   f"Le numéro de lot s'écrit normalement avec un zéro devant quand il n'a "
+                   f"qu'un chiffre : '{nouvelle_valeur}' au lieu de '{valeur}'.")
             total += 1
     return total
 
@@ -2633,7 +2606,7 @@ TITRES_CATEGORIES_RAPPORT = {
     "unite_cmd": "Unité de commande incohérente",
     "prix_cmd": "Prix de commande incohérent / inexpliqué",
     "conditionnement": "Conditionnement — signalement ou complément",
-    "poids_rempli": "Poids à l'unité de référence — rempli automatiquement",
+    "poids_rempli": "Poids à l'unité de référence — suggestion (rien n'est rempli)",
     "origine": "Origine non reconnue / ambiguë",
 }
 
@@ -2924,48 +2897,36 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
             cel_poids = ws.cell(row=ligne, column=col_poids_ref)
             if resultat_texte and resultat_texte[0] in ("kg", "l", "litre"):
                 quantite_texte = round(resultat_texte[1], 3)
-                cel_poids.value = quantite_texte
-                cel_poids.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
-                                              end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
-                cel_poids.comment = Comment(
-                    f"Poids à l'unité de référence interprété à partir du texte d'origine "
-                    f"('{poids_ref}') : {quantite_texte}.", AUTEUR_COMMENTAIRE)
+                marque(cel_poids, motor.COULEUR_UNITE_TRANSFORMEE, None,
+                       f"Ce texte semble vouloir dire {quantite_texte} kg/L.")
                 poids_ref = quantite_texte
             else:
                 marque(cel_poids, motor.COULEUR_A_VERIFIER, None,
                        f"Poids à l'unité de référence ('{poids_ref}') est du texte, pas un "
-                       "nombre, et n'a pas pu être interprété automatiquement — à convertir "
-                       "manuellement en kg/L.")
+                       "nombre, et on n'arrive pas à deviner lequel — à convertir à la main "
+                       "en kg/L.")
             stats["marques"] += 1
             poids_texte_marque = True
 
         if not unite_ref:
             base_deduite = derive_unite_ref_vide(ws_valeurs, ligne, fournisseurs)
             if base_deduite:
-                # Conditionnement + ratio de prix confirment exactement la base : on remplit
-                # avec confiance (couleur seule, pas de commentaire), au lieu de signaler vide.
+                # Conditionnement + ratio de prix confirment exactement la base — mais dans
+                # cette version, on ne remplit rien : on utilise cette valeur pour la suite de
+                # l'analyse de la ligne SANS l'écrire, et on commente juste la case.
                 unite_ref = base_deduite.upper()
-                cel_remplie = ws.cell(row=ligne, column=col_unite_ref)
-                cel_remplie.value = unite_ref
-                cel_remplie.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
-                                                end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+                marque(ws.cell(row=ligne, column=col_unite_ref), motor.COULEUR_UNITE_TRANSFORMEE,
+                       None,
+                       f"D'après l'emballage et la comparaison des prix, l'unité de référence "
+                       f"semble être '{unite_ref}'.")
                 stats["marques"] += 1
             else:
-                # Pas de commentaire ici : la couleur seule suffit (vide = à compléter), un
-                # commentaire par ligne alourdit le fichier pour rien.
-                cel_vide = ws.cell(row=ligne, column=col_unite_ref)
-                cel_vide.fill = PatternFill(start_color=motor.COULEUR_A_VERIFIER,
-                                             end_color=motor.COULEUR_A_VERIFIER, fill_type="solid")
+                marque(ws.cell(row=ligne, column=col_unite_ref), motor.COULEUR_A_VERIFIER, None,
+                       "Cette case est vide — sans elle, impossible de comparer le prix entre "
+                       "fournisseurs.")
                 stats["unite_ref_vide"] += 1
                 stats["marques"] += 1
                 continue
-
-        # Force la casse en MAJUSCULES dès maintenant (jamais marqué) : couvre aussi les
-        # lignes où AUCUN fournisseur n'a de prix (donc audite_fournisseur() ne s'exécute
-        # jamais assez pour s'en charger lui-même).
-        maj_d = majuscule_si_inchangee(unite_ref)
-        if maj_d:
-            ws.cell(row=ligne, column=col_unite_ref).value = maj_d
 
         ligne_a_un_probleme = poids_texte_marque
         for fournisseur in fournisseurs:
@@ -3088,19 +3049,18 @@ def main():
             print(f"    Lignes avec incohérence signalée : {stats['lignes_avec_incoherence']}")
             print(f"    Total de cellules marquées : {total_marques}")
 
-            nom_rapport = f"{nom_base} - rapport.md" if len(wb.sheetnames) <= 2 else \
-                f"{nom_base} - {nom_feuille} - rapport.md"
+            nom_rapport = f"{nom_base} - rapport_commenté.md" if len(wb.sheetnames) <= 2 else \
+                f"{nom_base} - {nom_feuille} - rapport_commenté.md"
             with open(os.path.join(DOSSIER_SORTIE, nom_rapport), "w", encoding="utf-8") as f:
                 f.write(resultat["rapport"])
 
-        chemin_sortie = os.path.join(DOSSIER_SORTIE, f"{nom_base} - audit.xlsx")
+        chemin_sortie = os.path.join(DOSSIER_SORTIE, f"{nom_base} - audit_commenté.xlsx")
         wb.save(chemin_sortie)
         print(f"  Fichier enregistré : {chemin_sortie}")
 
-    print("\nTerminé. Aucun prix ni unité n'a été modifié dans les fichiers sources — seules "
-          "la colonne Lot et, quand elle était vide et confirmée de façon fiable, la colonne "
-          "Poids à l'unité de référence ont été renseignées. Tout le reste n'est que "
-          "surlignage + commentaire, à valider par une personne.")
+    print("\nTerminé. Rien n'a été modifié dans les fichiers sources, à part le 'X' de Bio et "
+          "le nom du label quand ils sont trouvés dans le texte. Tout le reste n'est que "
+          "surlignage + commentaire en langage simple, à valider par une personne.")
 
 
 if __name__ == "__main__":

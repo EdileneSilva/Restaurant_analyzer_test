@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-cal
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY audit_geral.py app.py pretraitement.py pretraitement_grada.py pretraitement_auto.py ./
+COPY audit_general.py app.py pretraitement.py pretraitement_grada.py pretraitement_auto.py ./
 COPY first_scripts/first_attempt_v2_prototype.py ./first_scripts/first_attempt_v2_prototype.py
 
 EXPOSE 8501

@@ -3,7 +3,7 @@ Point d'entrée unique de prétraitement : détecte automatiquement le format
 d'un fichier déposé (REGAL, famille GRADA, ou déjà au format canonique de
 raw_data/) et le transforme en conséquence — pensé pour être appelé une
 seule fois par fichier, aussi bien en CLI qu'depuis l'app Streamlit, juste
-avant de passer le résultat à audit_geral.py.
+avant de passer le résultat à audit_general.py.
 
 Ne modifie ni pretraitement.py (REGAL) ni pretraitement_grada.py
 (AGRICOURT/VDR/Boucherie) : réutilise leurs fonctions. La partie GRADA est
@@ -70,7 +70,7 @@ def convertit_xls_en_xlsx(chemin_source):
 
 def _ligne_entete_canonique(ws):
     """Repère si une feuille a déjà le format canonique de raw_data/ (même
-    logique qu'audit_geral.localise_feuille_et_colonnes, en version
+    logique qu'audit_general.localise_feuille_et_colonnes, en version
     minimale) : une ligne (parmi les 5 premières) avec une cellule contenant
     « désignation de l'article » et une autre « unité de référence »."""
     for r in range(1, min(5, ws.max_row) + 1):
