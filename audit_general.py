@@ -365,8 +365,10 @@ ALIAS_UNITE_REF = {"pc": "unité"}
 # fermée à maintenir (le mot varie selon le produit : tranches de pain, biscuits, galettes...),
 # donc on accepte N'IMPORTE QUEL mot à cet endroit — SAUF une unité de poids/volume reconnue
 # ('kg', 'g'...), qui doit rester traitée par les motifs dédiés au poids (RE_TYPE,
-# RE_CONTENANT_MULTIPLIE...), jamais confondue avec un simple compte de pièces.
-_MOT_COMPTAGE_FINAL = rf"(?!(?:{_UNITES_REGEX})\b)[A-Za-zÀ-ÿ]+"
+# RE_CONTENANT_MULTIPLIE...), jamais confondue avec un simple compte de pièces. Le 's?' couvre
+# le pluriel ('litres', 'kilos'...) : sans lui, 'litres' passait le négatif (le \b échoue entre
+# 'litre' et le 's' collé) et 'SEAU DE 5 LITRES' était pris à tort pour '5 pièces'.
+_MOT_COMPTAGE_FINAL = rf"(?!(?:{_UNITES_REGEX})s?\b)[A-Za-zÀ-ÿ]+"
 
 RE_CONTENANT_NX_M_PIECES = re.compile(
     rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?(\d+)\s*x\s*(\d+)\s*{_MOT_COMPTAGE_FINAL}\s*$", re.I)
@@ -637,6 +639,32 @@ def corrige_faute_frappe_contenant(conditionnement):
     return conditionnement, None
 
 
+RE_FORMAT_BOITE = re.compile(r"\bboi?tes?\s*(\d+)\s*/\s*(\d+)\b", re.I)
+
+
+def reconsidere_format_boite(resultat, conditionnement, unite_cmd):
+    """Les formats de boîte de conserve normalisés ('BOITE 5/1', 'BOITE 3/1', 'BOITE 4/4'...)
+    sont des unités à part entière reconnues par la base (feuille 'Unités' du fichier de
+    référence métier), distinctes d'une 'BOITE' générique. Quand le conditionnement précise ce
+    format mais que l'unité de commande (actuelle, ou déjà proposée par les règles
+    précédentes) ne retient que 'BOITE' nue, on récupère le format."""
+    if not conditionnement:
+        return
+    m = RE_FORMAT_BOITE.search(conditionnement)
+    if not m:
+        return
+    valeur_actuelle = resultat.nouveau_l if resultat.nouveau_l is not None else unite_cmd
+    if not valeur_actuelle or motor.normalise_texte(valeur_actuelle) != "boite":
+        return  # déjà précisé, ou pas une 'BOITE' du tout : rien à faire
+    format_boite = f"{m.group(1)}/{m.group(2)}"
+    resultat.nouveau_l = f"BOITE {format_boite}"
+    resultat.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+    resultat.commentaire_l = (
+        f"Unité de commande précisée en 'BOITE {format_boite}' : le conditionnement "
+        f"('{conditionnement}') indique ce format normalisé de boîte, une unité à part "
+        "entière distincte de 'BOITE' générique.")
+
+
 def traite_ligne_etendue(unite_ref, poids_ref, designation, conditionnement, unite_cmd,
                           prix_ref, prix_cmd, desig_fourn=None):
     """Délègue à _traite_ligne_etendue_nucleo. La correction d'une éventuelle faute de frappe
@@ -645,6 +673,7 @@ def traite_ligne_etendue(unite_ref, poids_ref, designation, conditionnement, uni
     corrigée."""
     resultat = _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnement,
                                              unite_cmd, prix_ref, prix_cmd, desig_fourn)
+    reconsidere_format_boite(resultat, conditionnement, unite_cmd)
 
     # Garde-fou : une couleur posée sans commentaire (oubli dans motor.traite_ligne, ex: la
     # conversion PC -> KG par poids de référence ne renseigne que commentaire_k) rendrait la
@@ -736,37 +765,47 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                 and candidat_ok is not None and candidat_ok == total_pieces):
             # Contenant à double imbrication confirmé par le ratio des prix (ex: "CARTON DE 8
             # PACKS DE 4 GOURDES DE 90 GR", 8 packs/carton confirmé ; ou "CARTON 6 BOUTEILLES DE
-            # 75 CL", 6 bouteilles confirmé) : la vraie unité de référence est le contenant
-            # intermédiaire/intérieur (pack, bouteille...), pas 'PC' générique — règle métier
-            # documentée dans useful_stuff/Exemples unités et prix 6.xlsx ("CAS 3"). Exclu
-            # quand le récipient intérieur n'est que 'piece'/'pièce' (compte générique, pas un
-            # vrai récipient, ex: 'CARTON 6 PIECES DE 300 GR') : D doit rester 'PC' générique,
-            # seul le récipient extérieur (mot_ext_imbrique) reste pertinent pour L, géré dans
-            # le 'else' ci-dessous.
-            # CONTENANT_ABREGE normalise les variantes connues (ex: 'bouteile', faute de frappe
-            # fréquente à un seul L) vers l'orthographe correcte — sans ça, une faute de frappe
-            # non corrigée en amont sur le Conditionnement se retrouverait écrite telle quelle.
-            mot_piece_novo = motor.CONTENANT_ABREGE.get(mot_piece, mot_piece.upper())
+            # 75 CL", 6 bouteilles confirmé) — règle métier documentée dans
+            # useful_stuff/Exemples unités et prix 6.xlsx ("CAS 3"). Exclu quand le récipient
+            # intérieur n'est que 'piece'/'pièce' (compte générique, pas un vrai récipient, ex:
+            # 'CARTON 6 PIECES DE 300 GR') : D doit rester 'PC' générique, seul le récipient
+            # extérieur (mot_ext_imbrique) reste pertinent pour L, géré dans le 'else' ci-dessous.
+            #
+            # Le nom précis du contenant intermédiaire (pack, bouteille...) n'est PAS repris tel
+            # quel en D : le métier recommande de garder l'unité de référence simple (PC/KG/L —
+            # voir la note dans la feuille 'Unités' du fichier de référence). Deux cas :
+            #   - le contenant intermédiaire n'a AUCUNE subdivision interne (nb_pieces_internes
+            #     vide, ex: une bouteille) : il EST la pièce atomique -> 'PC' suffit.
+            #   - le contenant intermédiaire regroupe lui-même N pièces (nb_pieces_internes
+            #     rempli, ex: un pack de 4 gourdes) : 'PC' serait trompeur (une seule pièce qui
+            #     en contient plusieurs) -> 'PAQUET' (terme générique, accepté par la base)
+            #     décrit mieux ce niveau, le nombre de pièces restant précisé à part.
             mot_ext_novo = motor.CONTENANT_ABREGE.get(mot_ext_imbrique, mot_ext_imbrique.upper())
-            r.nouveau_d = mot_piece_novo
-            r.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
-            r.commentaire_d = (
-                f"Unité de référence précisée en '{mot_piece_novo}' (contenant intermédiaire) "
-                f"plutôt que 'PC' générique : le conditionnement ('{conditionnement}') décrit un "
-                f"contenant à double niveau, et le ratio Prix commande ÷ Prix référence "
-                f"({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) confirme {total_pieces} "
-                f"{mot_piece}s par {mot_ext_imbrique}.")
+            if nb_pieces_internes:
+                r.nouveau_d = "PAQUET"
+                r.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
+                r.commentaire_d = (
+                    f"Unité de référence précisée en 'PAQUET' : ce niveau ('{mot_piece}') n'est "
+                    f"pas une pièce atomique, il regroupe lui-même {nb_pieces_internes} pièces "
+                    f"individuelles, d'après le conditionnement ('{conditionnement}') — le ratio "
+                    f"Prix commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = "
+                    f"{round(ratio, 3)}) confirme {total_pieces} {mot_piece}s par "
+                    f"{mot_ext_imbrique} au total.")
+                r.nouveau_f = nb_pieces_internes
+                r.commentaire_f = (
+                    f"Renseigné à {nb_pieces_internes} : nombre d'éléments individuels par "
+                    f"'{mot_piece}', d'après le conditionnement ('{conditionnement}').")
+            else:
+                r.nouveau_d = "PC"
+                if motor.normalise_texte(unite_ref) not in ("pc", "piece", "pièce", "unite", "unité"):
+                    r.couleur_d = motor.COULEUR_UNITE_TRANSFORMEE
+                    r.commentaire_d = f"Unité de référence normalisée de '{unite_ref}' vers 'PC'."
             r.nouveau_l = mot_ext_novo
             r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
             r.commentaire_l = (
                 f"Unité de commande précisée en '{mot_ext_novo}' pour correspondre "
                 f"au contenant extérieur décrit dans le conditionnement ('{conditionnement}').")
             r.contenant_imbrique_confirme = True
-            if nb_pieces_internes:
-                r.nouveau_f = nb_pieces_internes
-                r.commentaire_f = (
-                    f"Renseigné à {nb_pieces_internes} : nombre d'éléments individuels par "
-                    f"'{mot_piece}', d'après le conditionnement ('{conditionnement}').")
         else:
             # L'unité de référence est bien à la pièce ici (pas un poids à recalculer en
             # kg/L) — toujours normaliser en 'PC', silencieusement si c'était déjà une variante
@@ -1427,6 +1466,22 @@ def reconsidere_prix_inexplique(resultat, unite_ref, conditionnement, unite_cmd,
     if m and unite_cmd and motor.normalise_texte(unite_cmd) == motor.normalise_texte(m.group(1)):
         resultat.couleur_m = None
         resultat.commentaire_m = None
+        nb_pieces = int(m.group(2))
+        if prix_cmd and abs(prix_cmd / prix_ref - nb_pieces) <= motor.TOLERANCE_RATIO * nb_pieces:
+            # Aucun poids n'est donné nulle part (impossible de vérifier un recalcul en kg/L),
+            # mais le ratio Prix commande ÷ Prix référence colle exactement au nombre de pièces
+            # annoncé par le conditionnement — signe que le prix de référence pourrait en
+            # réalité être un prix à la pièce, étiqueté à tort en kg/L. Simple suggestion à
+            # vérifier par une personne, jamais changé seul (le poids réel d'une pièce reste
+            # inconnu, donc pas de recalcul automatique).
+            resultat.couleur_d = motor.COULEUR_RATIO_SUSPECT
+            resultat.commentaire_d = (
+                f"Unité de référence actuelle : '{unite_ref}'. Le conditionnement "
+                f"('{conditionnement}') ne donne que {nb_pieces} pièces, sans aucun poids — et "
+                f"le ratio Prix commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = "
+                f"{round(prix_cmd / prix_ref, 3)}) correspond exactement à ce nombre de pièces. "
+                f"Cela suggère que l'unité de référence devrait peut-être être 'PC' plutôt que "
+                f"'{unite_ref}' — à vérifier, non modifié automatiquement.")
         return
 
     ratio_observe = prix_cmd / prix_ref
@@ -1552,6 +1607,11 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
 
     conditionnement = nettoie_conditionnement(conditionnement)
     cat = motor.categorie_commande(unite_cmd)
+    if RE_FORMAT_BOITE.fullmatch(cat):
+        # 'BOITE 5/1', 'BOITE 3/1'... : format de boîte normalisé (voir
+        # reconsidere_format_boite) — reste une 'boite' pour la comparaison ci-dessous avec
+        # le mot trouvé dans le conditionnement/la désignation.
+        cat = "boite"
     cond = motor.normalise_texte(conditionnement)
     desig = motor.normalise_texte(designation)
     texte_combine = f"{cond} {desig}"
@@ -2153,8 +2213,12 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
             total += 1
         if resultat.couleur_l in COULEURS_INCOHERENCE and resultat.commentaire_l and (
                 l_differe or resultat.nouveau_l is None):
+            texte_l = resultat.commentaire_l
+            if l_differe:
+                ancienne_valeur_l = str(unite_cmd).strip() if unite_cmd else "vide"
+                texte_l += f" (c'était '{ancienne_valeur_l}' avant)."
             marque(ws.cell(row=ligne, column=fournisseur["unite_cmd"]), resultat.couleur_l,
-                   fournisseur["nom"], resultat.commentaire_l)
+                   fournisseur["nom"], texte_l)
             total += 1
         if resultat.couleur_m in COULEURS_INCOHERENCE and resultat.commentaire_m:
             marque(ws.cell(row=ligne, column=fournisseur["prix_cmd"]), resultat.couleur_m,
@@ -2435,16 +2499,15 @@ def signale_champs_obligatoires_optionnels(ws, ligne_debut, col_marche, col_lot,
 
     total = 0
 
-    def marque_champ(ligne, colonne, obligatoire):
+    def marque_champ(ligne, colonne, obligatoire, nom_champ):
         nonlocal total
         if obligatoire:
             marque(ws.cell(row=ligne, column=colonne), COULEUR_CHAMP_OBLIGATOIRE_VIDE, None,
-                   "Champ obligatoire vide : sans cette information, l'intégration ne sera pas "
-                   "possible.")
+                   f"Sans {nom_champ} de l'article, l'intégration ne sera pas possible.")
         else:
             marque(ws.cell(row=ligne, column=colonne), motor.COULEUR_A_VERIFIER, None,
-                   "Champ optionnel vide : il est conseillé de le renseigner pour une "
-                   "meilleure intégration de vos données.")
+                   f"Sans {nom_champ} de l'article, l'intégration sera possible mais il est "
+                   "conseillé de le renseigner pour une meilleure qualité des données.")
         total += 1
 
     for ligne in range(ligne_debut, ws.max_row + 1):
@@ -2477,37 +2540,44 @@ def signale_champs_obligatoires_optionnels(ws, ligne_debut, col_marche, col_lot,
             continue  # ligne totalement vide : gérée ailleurs (candidate à la suppression)
 
         if col_marche and vide(marche_val):
-            marque_champ(ligne, col_marche, True)
+            marque_champ(ligne, col_marche, True, "le Marché")
         if col_lot and vide(lot_val):
-            marque_champ(ligne, col_lot, True)
+            marque_champ(ligne, col_lot, True, "le Lot")
         if vide(designation_val):
-            marque_champ(ligne, col_designation, True)
+            marque_champ(ligne, col_designation, True, "la Désignation de l'article")
         if vide(unite_ref_val):
-            marque_champ(ligne, col_unite_ref, True)
+            marque_champ(ligne, col_unite_ref, True, "l'Unité de référence")
 
         for f, valeurs in blocs:
             if not any(not vide(v) for v in valeurs.values()):
                 continue  # bloc Fournisseur entièrement vide : n'a pas participé, on l'ignore
             if vide(valeurs["nom"]):
-                marque_champ(ligne, f["cond"] - 1, True)
+                marque_champ(ligne, f["cond"] - 1, True, f"le nom du {f['nom']}")
             if vide(valeurs["unite_cmd"]):
-                marque_champ(ligne, f["unite_cmd"], True)
+                marque_champ(ligne, f["unite_cmd"], True, "l'Unité de commande")
             if vide(valeurs["prix_ref"]):
-                marque_champ(ligne, f["prix_ref"], True)
+                marque_champ(ligne, f["prix_ref"], True, "le Prix de référence")
             if vide(valeurs["prix_cmd"]):
-                marque_champ(ligne, f["prix_cmd"], True)
+                marque_champ(ligne, f["prix_cmd"], True, "le Prix de commande")
             if vide(valeurs["cond"]):
-                marque_champ(ligne, f["cond"], False)
+                marque_champ(ligne, f["cond"], False, "le Conditionnement")
             if vide(valeurs["desig_fourn"]):
-                marque_champ(ligne, f["desig_fourn"], False)
+                marque_champ(ligne, f["desig_fourn"], False, "la Désignation fournisseur")
             if vide(valeurs["ref"]):
-                marque_champ(ligne, f["ref"], False)
+                marque_champ(ligne, f["ref"], False, "la Référence produit")
     return total
 
 
-def signale_copies_possibles_fournisseur(ws, ws_valeurs, ligne_debut, fournisseur):
+def signale_copies_possibles_fournisseur(ws, ws_valeurs, ligne_debut, fournisseur,
+                                          lignes_a_exclure=()):
+    """'lignes_a_exclure' : lignes qui font partie d'un doublon COMPLET (toute la ligne
+    identique) — déjà repeintes en rouge par ailleurs, avec un commentaire qui ne laisse aucune
+    ambiguïté. Les exclure ici évite de suggérer une 'comparaison' entre deux lignes dont on
+    sait déjà avec certitude qu'elles sont identiques."""
     groupes = {}
     for ligne in range(ligne_debut, ws_valeurs.max_row + 1):
+        if ligne in lignes_a_exclure:
+            continue
         ref = ws_valeurs.cell(row=ligne, column=fournisseur["ref"]).value
         k = ws_valeurs.cell(row=ligne, column=fournisseur["prix_ref"]).value
         if ref and k:
@@ -2872,7 +2942,7 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
 
     for fournisseur in fournisseurs:
         stats["copies_possibles"] += signale_copies_possibles_fournisseur(
-            ws, ws_valeurs, ligne_debut, fournisseur)
+            ws, ws_valeurs, ligne_debut, fournisseur, set(doublons))
 
     stats["copies_possibles"] += signale_designation_dupliquee(
         ws, ws_valeurs, ligne_debut, col_designation, fournisseurs, set(doublons), col_lot)
