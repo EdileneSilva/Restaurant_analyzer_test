@@ -665,6 +665,30 @@ def reconsidere_format_boite(resultat, conditionnement, unite_cmd):
         "entière distincte de 'BOITE' générique.")
 
 
+RE_N_PIECES_UNITE_CMD = re.compile(r"^(\d+)\s*pi[eè]ces?$", re.I)
+
+
+def reconsidere_lot_pieces_brutes(resultat):
+    """Quand l'unité de commande finalement proposée n'est qu'un décompte brut recopié du
+    conditionnement (ex: '2 PIECES', sans aucun récipient nommé — cf. '2 PIECES DE 2 KG') : ce
+    n'est pas une vraie unité, juste le texte du conditionnement répété. On la fait passer par
+    le même traitement que 'LOT DE N' (voir RE_LOT_DE_N_UNITE_CMD dans audite_fournisseur) en
+    la réécrivant dans ce format, pour que l'unité de commande finale devienne 'LOT' et que le
+    nombre reste visible dans le Conditionnement."""
+    valeur = resultat.nouveau_l
+    if not isinstance(valeur, str):
+        return
+    m = RE_N_PIECES_UNITE_CMD.match(valeur.strip())
+    if not m:
+        return
+    resultat.nouveau_l = f"LOT DE {m.group(1)}"
+    resultat.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+    resultat.commentaire_l = (
+        f"Unité de commande '{valeur}' n'est qu'un décompte recopié du conditionnement, pas "
+        "une vraie unité — regroupée sous 'LOT' (le nombre reste visible dans le "
+        "Conditionnement).")
+
+
 def traite_ligne_etendue(unite_ref, poids_ref, designation, conditionnement, unite_cmd,
                           prix_ref, prix_cmd, desig_fourn=None):
     """Délègue à _traite_ligne_etendue_nucleo. La correction d'une éventuelle faute de frappe
@@ -674,6 +698,7 @@ def traite_ligne_etendue(unite_ref, poids_ref, designation, conditionnement, uni
     resultat = _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnement,
                                              unite_cmd, prix_ref, prix_cmd, desig_fourn)
     reconsidere_format_boite(resultat, conditionnement, unite_cmd)
+    reconsidere_lot_pieces_brutes(resultat)
 
     # Garde-fou : une couleur posée sans commentaire (oubli dans motor.traite_ligne, ex: la
     # conversion PC -> KG par poids de référence ne renseigne que commentaire_k) rendrait la
@@ -1016,7 +1041,12 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                     return r
 
                 ratio_prix = prix_cmd / prix_ref
-                tolerance_qte = max(0.05, 0.05 * quantite)
+                # Alignée sur motor.TOLERANCE_RATIO (2%, la tolérance standard du projet) —
+                # c'était à tort 5% ici (0.05 * quantite), ce qui laissait passer en silence des
+                # écarts entre 2% et 5% (ex: ratio=5 vs quantité réelle=4.8, 4% d'écart). Le
+                # plancher absolu (0.05 kg/L) reste séparé : il évite de signaler un simple bruit
+                # d'arrondi sur de très petites quantités, quel que soit le pourcentage retenu.
+                tolerance_qte = max(0.05, motor.TOLERANCE_RATIO * quantite)
 
                 # Ratio ≈ 1 (prix de commande = prix de référence) avec une unité de référence
                 # à la pièce : confirmé à plusieurs reprises sur des fichiers réels (ex: 'PIECE
@@ -1193,6 +1223,16 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                         f"{base} = {nouveau_k} (prix de référence actuel : {prix_ref}). Le "
                         f"conditionnement ('{conditionnement}') indique {qte_affichee} {base} "
                         f"pour ce récipient — à vérifier, non modifié automatiquement.")
+                    if mot in ("piece", "pièce"):
+                        # 'piece' générique (pas un vrai récipient nommé) : l'incohérence peut
+                        # aussi bien venir d'une Unité de référence mal choisie (l'article est
+                        # peut-être vendu à la pièce, pas au kg/L) que d'un prix de référence
+                        # erroné — les deux pistes sont à vérifier, pas seulement le prix.
+                        r.commentaire_k += (
+                            f" Autre piste à considérer : l'article est peut-être vendu à la "
+                            f"pièce, pas au {base} — dans ce cas, ce serait l'Unité de "
+                            f"référence ('{unite_ref}') qu'il faudrait changer en 'PC', plutôt "
+                            "que le prix.")
 
                 if l_change:
                     r.nouveau_l = l_novo
@@ -2188,12 +2228,21 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                 cel_cond = ws.cell(row=ligne, column=fournisseur["cond"])
                 texte_cond_actuel = cel_cond.value
                 if not (texte_cond_actuel and re.search(r"\blot\b", str(texte_cond_actuel), re.I)):
-                    cel_cond.value = (f"LOT DE {n_lot}, {texte_cond_actuel}" if texte_cond_actuel
+                    # Si le nombre est déjà visible en tête du Conditionnement (ex: '100 x
+                    # 10g', '2 PIECES DE 2 KG'), pas la peine de le répéter : on ajoute juste
+                    # 'LOT DE' devant. Sinon (ex: '6 x 4 x 100g', où N=24 est le PRODUIT, jamais
+                    # écrit tel quel), le nombre reste nécessaire pour ne pas perdre
+                    # l'information.
+                    deja_visible = bool(texte_cond_actuel
+                                         and re.match(rf"^\s*{re.escape(n_lot)}\b", str(texte_cond_actuel)))
+                    prefixe = "LOT DE" if deja_visible else f"LOT DE {n_lot},"
+                    cel_cond.value = (f"{prefixe} {texte_cond_actuel}" if texte_cond_actuel
                                        else f"LOT DE {n_lot}")
                     marque(cel_cond, motor.COULEUR_UNITE_TRANSFORMEE, fournisseur["nom"],
-                           f"'LOT DE {n_lot}' ajouté au début du Conditionnement : l'unité de "
-                           "commande ne garde que 'LOT', le nombre est précisé ici pour ne pas "
-                           "perdre l'information.")
+                           f"'{prefixe}' ajouté au début du Conditionnement : l'unité de "
+                           "commande ne garde que 'LOT'" + (
+                               ", le nombre reste visible ici." if deja_visible else
+                               ", le nombre est précisé ici pour ne pas perdre l'information."))
                     total += 1
             ws.cell(row=ligne, column=fournisseur["unite_cmd"]).value = valeur_l
         else:
