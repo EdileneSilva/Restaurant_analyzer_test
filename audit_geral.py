@@ -100,6 +100,10 @@ motor.COULEUR_A_VERIFIER = "FFBFBFBF"
 motor.COULEUR_RATIO_SUSPECT = motor.COULEUR_COMMANDE_SUSPECTE = "FFD5A6BD"
 motor.COULEUR_COUSTERON = motor.COULEUR_PRIX_INEXPLIQUE = "FF92D050"
 motor.COULEUR_COPIE_POSSIBLE = "FFFF6969"
+# Champ obligatoire vide (bloque l'intégration en base) — distinct des 6 couleurs ci-dessus,
+# qui parlent toutes de cohérence/changement, jamais de complétude. Les champs optionnels vides
+# réutilisent le gris existant (COULEUR_A_VERIFIER), déjà "cellule vide" partout ailleurs.
+COULEUR_CHAMP_OBLIGATOIRE_VIDE = "FFFABF8F"
 
 motor.PACKAGE_TYPES = tuple(MOTS_CONTENANT)
 # Un ou plusieurs mots qualificatifs (matière, ou...) insérés entre le récipient et sa
@@ -1336,6 +1340,12 @@ RE_CONTENANT_PIECES_SEULEMENT = re.compile(
 # (voir le marqueur spécial 'lot' dans piece_carton_candidats()).
 RE_LOT_PIECES_SEULEMENT = re.compile(r"^\s*lots?\s+(?:de\s+)?(\d+)\s*pi[eè]ces?\s*$", re.I)
 
+# Détecte 'LOT DE N' écrit tel quel en unité de commande (toutes origines confondues — piece_
+# carton_candidats, le relabel kg/L 'N x 1kg/1L'...) : l'unité de commande elle-même ne garde
+# que 'LOT' (le nombre n'est pas vraiment une unité), et le nombre est reporté au début du
+# Conditionnement à la place (voir le point d'écriture de L dans audite_fournisseur).
+RE_LOT_DE_N_UNITE_CMD = re.compile(r"^lot\s+de\s+(\d+)$", re.I)
+
 # Multiplicateur explicite devant un mot de récipient, n'importe où dans un texte libre non
 # structuré (ex: 'sous-atmosphère - 4 barquettes de 400g') — contrairement aux motifs stricts
 # ci-dessus (ancrés en ^...$), celui-ci sert à la recherche de dernier recours dans
@@ -2108,6 +2118,23 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                 ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]).value = maj
         if resultat.nouveau_l is not None:
             valeur_l = resultat.nouveau_l.upper() if isinstance(resultat.nouveau_l, str) else resultat.nouveau_l
+            m_lot = RE_LOT_DE_N_UNITE_CMD.match(valeur_l) if isinstance(valeur_l, str) else None
+            if m_lot:
+                # 'LOT' seul en unité de commande — le nombre n'est pas vraiment une unité, il
+                # va plutôt au début du Conditionnement (sauf s'il y est déjà, sous une forme ou
+                # une autre : pas la peine de répéter).
+                n_lot = m_lot.group(1)
+                valeur_l = "LOT"
+                cel_cond = ws.cell(row=ligne, column=fournisseur["cond"])
+                texte_cond_actuel = cel_cond.value
+                if not (texte_cond_actuel and re.search(r"\blot\b", str(texte_cond_actuel), re.I)):
+                    cel_cond.value = (f"LOT DE {n_lot}, {texte_cond_actuel}" if texte_cond_actuel
+                                       else f"LOT DE {n_lot}")
+                    marque(cel_cond, motor.COULEUR_UNITE_TRANSFORMEE, fournisseur["nom"],
+                           f"'LOT DE {n_lot}' ajouté au début du Conditionnement : l'unité de "
+                           "commande ne garde que 'LOT', le nombre est précisé ici pour ne pas "
+                           "perdre l'information.")
+                    total += 1
             ws.cell(row=ligne, column=fournisseur["unite_cmd"]).value = valeur_l
         else:
             maj = majuscule_si_inchangee(unite_cmd)
@@ -2385,6 +2412,99 @@ def signale_designation_dupliquee(ws, ws_valeurs, ligne_debut, col_designation, 
     return total
 
 
+def signale_champs_obligatoires_optionnels(ws, ligne_debut, col_marche, col_lot,
+                                            col_designation, col_unite_ref, fournisseurs,
+                                            lignes_a_supprimer):
+    """Pour chaque ligne qui contient AU MOINS une donnée (une ligne totalement vide est déjà
+    gérée ailleurs comme candidate à la suppression, et une ligne entièrement repeinte en rouge
+    — doublon complet ou résiduelle sans désignation ni prix — est ignorée ici via
+    'lignes_a_supprimer', pour ne pas recouvrir partiellement ce rouge) :
+      - signale en orange les champs OBLIGATOIRES vides (Marché, Lot, Désignation de
+        l'article, Unité de référence, et par bloc Fournisseur : le nom du fournisseur, l'Unité
+        de commande, le Prix de référence, le Prix de commande) — sans eux, l'intégration dans
+        la base ne sera pas possible ;
+      - signale en gris les champs OPTIONNELS vides, par bloc Fournisseur : Conditionnement,
+        Désignation fournisseur, Référence produit — conseillés, pas bloquants.
+    Un bloc Fournisseur N entièrement vide n'est jamais signalé : il n'a simplement pas
+    participé à cette ligne (le bloc Fournisseur 2/3 n'existe que pour comparaison avec le 1,
+    pas un champ à remplir systématiquement). Lit l'état FINAL des cellules (ws, pas ws_valeurs)
+    : exécuté en tout dernier, après tout remplissage automatique (Marché/Lot recopiés, Unité de
+    référence déduite...), pour ne signaler que ce qui reste réellement vide."""
+    def vide(valeur):
+        return valeur is None or (isinstance(valeur, str) and valeur.strip() == "")
+
+    total = 0
+
+    def marque_champ(ligne, colonne, obligatoire):
+        nonlocal total
+        if obligatoire:
+            marque(ws.cell(row=ligne, column=colonne), COULEUR_CHAMP_OBLIGATOIRE_VIDE, None,
+                   "Champ obligatoire vide : sans cette information, l'intégration ne sera pas "
+                   "possible.")
+        else:
+            marque(ws.cell(row=ligne, column=colonne), motor.COULEUR_A_VERIFIER, None,
+                   "Champ optionnel vide : il est conseillé de le renseigner pour une "
+                   "meilleure intégration de vos données.")
+        total += 1
+
+    for ligne in range(ligne_debut, ws.max_row + 1):
+        if ligne in lignes_a_supprimer:
+            continue
+
+        marche_val = ws.cell(row=ligne, column=col_marche).value if col_marche else None
+        lot_val = ws.cell(row=ligne, column=col_lot).value if col_lot else None
+        designation_val = ws.cell(row=ligne, column=col_designation).value
+        unite_ref_val = ws.cell(row=ligne, column=col_unite_ref).value
+
+        blocs = []
+        for f in fournisseurs:
+            valeurs = {
+                "nom": ws.cell(row=ligne, column=f["cond"] - 1).value,
+                "cond": ws.cell(row=ligne, column=f["cond"]).value,
+                "desig_fourn": ws.cell(row=ligne, column=f["desig_fourn"]).value,
+                "ref": ws.cell(row=ligne, column=f["ref"]).value,
+                "prix_ref": ws.cell(row=ligne, column=f["prix_ref"]).value,
+                "unite_cmd": ws.cell(row=ligne, column=f["unite_cmd"]).value,
+                "prix_cmd": ws.cell(row=ligne, column=f["prix_cmd"]).value,
+            }
+            blocs.append((f, valeurs))
+
+        ligne_a_des_donnees = (
+            not vide(marche_val) or not vide(lot_val) or not vide(designation_val)
+            or not vide(unite_ref_val)
+            or any(any(not vide(v) for v in valeurs.values()) for _, valeurs in blocs))
+        if not ligne_a_des_donnees:
+            continue  # ligne totalement vide : gérée ailleurs (candidate à la suppression)
+
+        if col_marche and vide(marche_val):
+            marque_champ(ligne, col_marche, True)
+        if col_lot and vide(lot_val):
+            marque_champ(ligne, col_lot, True)
+        if vide(designation_val):
+            marque_champ(ligne, col_designation, True)
+        if vide(unite_ref_val):
+            marque_champ(ligne, col_unite_ref, True)
+
+        for f, valeurs in blocs:
+            if not any(not vide(v) for v in valeurs.values()):
+                continue  # bloc Fournisseur entièrement vide : n'a pas participé, on l'ignore
+            if vide(valeurs["nom"]):
+                marque_champ(ligne, f["cond"] - 1, True)
+            if vide(valeurs["unite_cmd"]):
+                marque_champ(ligne, f["unite_cmd"], True)
+            if vide(valeurs["prix_ref"]):
+                marque_champ(ligne, f["prix_ref"], True)
+            if vide(valeurs["prix_cmd"]):
+                marque_champ(ligne, f["prix_cmd"], True)
+            if vide(valeurs["cond"]):
+                marque_champ(ligne, f["cond"], False)
+            if vide(valeurs["desig_fourn"]):
+                marque_champ(ligne, f["desig_fourn"], False)
+            if vide(valeurs["ref"]):
+                marque_champ(ligne, f["ref"], False)
+    return total
+
+
 def signale_copies_possibles_fournisseur(ws, ws_valeurs, ligne_debut, fournisseur):
     groupes = {}
     for ligne in range(ligne_debut, ws_valeurs.max_row + 1):
@@ -2469,15 +2589,20 @@ def applique_formatage_uniforme(ws, ligne_debut):
             cel.alignment = Alignment(horizontal="left", vertical="center", wrap_text=wrap_text)
 
 
-def desocculte_lignes(ws):
-    """Réaffiche toutes les lignes masquées — résidu fréquent d'un filtre automatique appliqué
-    par la personne qui a rempli le fichier (pour ne regarder qu'un sous-ensemble de produits),
-    puis laissé actif à l'enregistrement. Une ligne masquée contient souvent un produit bien
-    réel (pas une ligne vide), invisible à la relecture si elle n'est pas réaffichée. Purement
-    cosmétique : ne touche à aucune donnée, et ne modifie pas les boutons de filtre eux-mêmes
-    (une personne peut toujours filtrer à nouveau si besoin)."""
+def desocculte_lignes_et_colonnes(ws):
+    """Réaffiche toutes les lignes ET colonnes masquées — résidu fréquent d'un filtre
+    automatique (lignes) ou d'un masquage manuel de colonne (ex: une colonne 'Désignation
+    fournisseur' repliée pour gagner de la place à l'écran), tous deux laissés actifs à
+    l'enregistrement. Une ligne/colonne masquée contient souvent une donnée bien réelle (pas
+    vide), invisible à la relecture si elle n'est pas réaffichée. Purement cosmétique : ne
+    touche à aucune donnée, et ne modifie pas les boutons de filtre eux-mêmes (une personne peut
+    toujours filtrer/masquer à nouveau si besoin)."""
     total = 0
     for dim in ws.row_dimensions.values():
+        if dim.hidden:
+            dim.hidden = False
+            total += 1
+    for dim in ws.column_dimensions.values():
         if dim.hidden:
             dim.hidden = False
             total += 1
@@ -2498,15 +2623,17 @@ def normalise_lots(ws, ws_valeurs, ligne_debut, col_lot):
 
 
 TITRES_CATEGORIES_RAPPORT = {
-    "doublons": "Lignes strictement dupliquées",
+    "doublons": "Lignes strictement dupliquées (ou candidates à la suppression)",
     "references_doublon": "Références en double (même référence + même prix)",
-    "unite_ref_vide": "Unité de référence vide",
+    "designation_dupliquee": "Même désignation qu'une autre ligne (même fournisseur, ou Lot différent)",
+    "champs_obligatoires_vides": "Champs obligatoires vides (bloquent l'intégration)",
+    "champs_optionnels_vides": "Champs optionnels vides (conseillés)",
     "unite_ref": "Unité de référence incohérente",
-    "prix_ref": "Prix de référence (BPU) incohérent",
+    "prix_ref": "Prix de référence (BPU) incohérent / suggéré",
     "unite_cmd": "Unité de commande incohérente",
     "prix_cmd": "Prix de commande incohérent / inexpliqué",
+    "conditionnement": "Conditionnement — signalement ou complément",
     "poids_rempli": "Poids à l'unité de référence — rempli automatiquement",
-    "valeurs_manquantes": "Valeurs manquantes (prix de référence ou de commande)",
     "origine": "Origine non reconnue / ambiguë",
 }
 
@@ -2515,13 +2642,18 @@ def calcule_categories_rapport(ws, ws_valeurs, ligne_debut, col_designation, col
                                 col_poids_ref, fournisseurs):
     """Relit les commentaires posés sur la feuille et les classe par catégorie — séparé de
     genere_rapport() pour que l'application Streamlit puisse aussi construire sa propre
-    présentation (titres + compteurs, détails repliés) à partir des mêmes données."""
+    présentation (titres + compteurs, détails repliés) à partir des mêmes données.
+    Les champs obligatoires/optionnels vides (signale_champs_obligatoires_optionnels) sont
+    repérés par leur TEXTE en premier, avant tout classement par colonne : ce signalement peut
+    tomber sur n'importe quelle colonne concernée (Marché, Lot, nom du Fournisseur, Désignation
+    fournisseur...), dont certaines n'ont par ailleurs aucune autre catégorie dédiée."""
     categories = {cle: [] for cle in TITRES_CATEGORIES_RAPPORT}
 
     colonnes_ref = {f["ref"] for f in fournisseurs}
     colonnes_prix_ref = {f["prix_ref"] for f in fournisseurs}
     colonnes_unite_cmd = {f["unite_cmd"] for f in fournisseurs}
     colonnes_prix_cmd = {f["prix_cmd"] for f in fournisseurs}
+    colonnes_cond = {f["cond"] for f in fournisseurs}
     colonnes_origine = {f["origine"] for f in fournisseurs if f.get("origine")}
 
     for ligne in range(ligne_debut, ws.max_row + 1):
@@ -2532,37 +2664,56 @@ def calcule_categories_rapport(ws, ws_valeurs, ligne_debut, col_designation, col
                 continue
             texte = cel.comment.text
 
-            if colonne == col_designation and "dupliquée" in texte:
+            if "Champ obligatoire vide" in texte:
+                categories["champs_obligatoires_vides"].append((ligne, designation, texte))
+            elif "Champ optionnel vide" in texte:
+                categories["champs_optionnels_vides"].append((ligne, designation, texte))
+            elif colonne == col_designation and (
+                    "dupliquée" in texte or "probablement à supprimer" in texte):
                 categories["doublons"].append((ligne, designation, texte))
+            elif colonne == col_designation and (
+                    "(même fournisseur)" in texte or "Lot différent" in texte):
+                categories["designation_dupliquee"].append((ligne, designation, texte))
             elif colonne in colonnes_ref and "Copie possible" in texte:
                 categories["references_doublon"].append((ligne, designation, texte))
             elif colonne == col_unite_ref:
-                if "vide" in texte:
-                    categories["unite_ref_vide"].append((ligne, designation, texte))
-                else:
-                    categories["unite_ref"].append((ligne, designation, texte))
+                categories["unite_ref"].append((ligne, designation, texte))
             elif col_poids_ref and colonne == col_poids_ref:
                 categories["poids_rempli"].append((ligne, designation, texte))
             elif colonne in colonnes_prix_ref:
-                if "manquant" in texte:
-                    categories["valeurs_manquantes"].append((ligne, designation, texte))
-                else:
-                    categories["prix_ref"].append((ligne, designation, texte))
+                categories["prix_ref"].append((ligne, designation, texte))
             elif colonne in colonnes_unite_cmd:
                 categories["unite_cmd"].append((ligne, designation, texte))
             elif colonne in colonnes_prix_cmd:
-                if "manquant" in texte:
-                    categories["valeurs_manquantes"].append((ligne, designation, texte))
-                else:
-                    categories["prix_cmd"].append((ligne, designation, texte))
+                categories["prix_cmd"].append((ligne, designation, texte))
+            elif colonne in colonnes_cond:
+                categories["conditionnement"].append((ligne, designation, texte))
             elif colonne in colonnes_origine:
                 categories["origine"].append((ligne, designation, texte))
 
     return categories
 
 
+def calcule_valeurs_uniques(ws_valeurs, ligne_debut, colonne):
+    """Compte les valeurs EXACTEMENT distinctes d'une colonne (espaces en début/fin compris —
+    aucune normalisation) : deux cellules qui semblent identiques à l'œil mais diffèrent par un
+    espace en trop restent deux valeurs séparées ici, justement pour que ça se voie. Renvoie une
+    liste de (valeur, longueur, nombre d'occurrences), triée alphabétiquement pour que deux
+    variantes très proches (ex: avec/sans espace final) se retrouvent l'une à côté de l'autre."""
+    if not colonne:
+        return []
+    compte = {}
+    for ligne in range(ligne_debut, ws_valeurs.max_row + 1):
+        valeur = ws_valeurs.cell(row=ligne, column=colonne).value
+        if valeur is None or str(valeur) == "":
+            continue
+        valeur = str(valeur)
+        compte[valeur] = compte.get(valeur, 0) + 1
+    return sorted(((v, len(v), n) for v, n in compte.items()), key=lambda t: t[0])
+
+
 def genere_rapport(ws, ws_valeurs, nom_feuille, ligne_debut, col_designation, col_unite_ref,
-                    col_poids_ref, fournisseurs, categories=None):
+                    col_poids_ref, fournisseurs, categories=None, col_lot=None):
     if categories is None:
         categories = calcule_categories_rapport(ws, ws_valeurs, ligne_debut, col_designation,
                                                  col_unite_ref, col_poids_ref, fournisseurs)
@@ -2574,6 +2725,30 @@ def genere_rapport(ws, ws_valeurs, nom_feuille, ligne_debut, col_designation, co
         f"Total d'éléments signalés : **{total_general}**",
         "",
     ]
+
+    # Valeurs uniques de Lot, en premier et triées par ordre CROISSANT du numéro de lot (pas
+    # alphabétique : sinon '12.' passerait avant '4.') — espaces comptés, aucune normalisation,
+    # pour repérer à l'œil des variantes qui devraient être identiques mais ne le sont pas
+    # exactement (espace en trop, casse différente...).
+    valeurs_lot = calcule_valeurs_uniques(ws_valeurs, ligne_debut, col_lot)
+
+    def _cle_tri_lot(item):
+        valeur = item[0]
+        m = re.match(r"\s*(\d+)", valeur)
+        return (int(m.group(1)), valeur) if m else (float("inf"), valeur)
+
+    valeurs_lot.sort(key=_cle_tri_lot)
+    lignes_sortie.append(f"## Valeurs uniques — Lot ({len(valeurs_lot)}, espaces comptés)")
+    lignes_sortie.append("")
+    if not valeurs_lot:
+        lignes_sortie.append("_(aucune colonne Lot repérée)_")
+    else:
+        lignes_sortie.append("| Valeur | Longueur | Occurrences |")
+        lignes_sortie.append("|---|---|---|")
+        for valeur, longueur, occurrences in valeurs_lot:
+            lignes_sortie.append(f"| `{valeur}` | {longueur} | {occurrences} |")
+    lignes_sortie.append("")
+
     for cle, titre in TITRES_CATEGORIES_RAPPORT.items():
         elements = categories[cle]
         lignes_sortie.append(f"## {titre} ({len(elements)})")
@@ -2584,6 +2759,20 @@ def genere_rapport(ws, ws_valeurs, nom_feuille, ligne_debut, col_designation, co
             desig_courte = (designation or "").strip()
             lignes_sortie.append(f"- **Ligne {ligne}** — {desig_courte}")
             lignes_sortie.append(f"  {texte}")
+        lignes_sortie.append("")
+
+    for f in fournisseurs:
+        valeurs_fourn = calcule_valeurs_uniques(ws_valeurs, ligne_debut, f["cond"] - 1)
+        lignes_sortie.append(
+            f"## Valeurs uniques — {f['nom']} ({len(valeurs_fourn)}, espaces comptés)")
+        lignes_sortie.append("")
+        if not valeurs_fourn:
+            lignes_sortie.append("_(aucune valeur)_")
+        else:
+            lignes_sortie.append("| Valeur | Longueur | Occurrences |")
+            lignes_sortie.append("|---|---|---|")
+            for valeur, longueur, occurrences in valeurs_fourn:
+                lignes_sortie.append(f"| `{valeur}` | {longueur} | {occurrences} |")
         lignes_sortie.append("")
 
     return "\n".join(lignes_sortie)
@@ -2664,7 +2853,7 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
     stats = {"lignes_avec_incoherence": 0, "marques": 0, "unite_ref_vide": 0,
               "lignes_dupliquees": 0, "copies_possibles": 0, "lots_normalises": 0,
               "marche_lot_rempli": 0, "marche_lot_signale": 0, "lignes_vides_a_supprimer": 0,
-              "lignes_demasquees": desocculte_lignes(ws)}
+              "lignes_demasquees": desocculte_lignes_et_colonnes(ws)}
 
     # Calculé tôt (pas seulement en fin de fonction) pour que signale_designation_dupliquee()
     # puisse exclure les lignes déjà couvertes par le doublon de ligne COMPLÈTE (repeint en
@@ -2688,6 +2877,7 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
     stats["copies_possibles"] += signale_designation_dupliquee(
         ws, ws_valeurs, ligne_debut, col_designation, fournisseurs, set(doublons), col_lot)
 
+    lignes_a_supprimer = set()
     for ligne in range(ligne_debut, ws_valeurs.max_row + 1):
         designation = ws_valeurs.cell(row=ligne, column=col_designation).value
         if not designation:
@@ -2716,6 +2906,7 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
                 stats["marques"] += 1
                 stats["lignes_avec_incoherence"] += 1
                 stats["lignes_vides_a_supprimer"] += 1
+                lignes_a_supprimer.add(ligne)
             continue
 
         unite_ref = ws_valeurs.cell(row=ligne, column=col_unite_ref).value
@@ -2791,6 +2982,17 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
     # une autre couleur posée cellule par cellule plus haut (doublons calculé plus haut).
     stats["lignes_dupliquees"] = marque_lignes_dupliquees(ws, doublons, col_designation)
 
+    for ligne, (autres, _designations_identiques) in doublons.items():
+        if ligne != min([ligne] + autres):
+            lignes_a_supprimer.add(ligne)
+
+    # Tout en dernier : lit l'état FINAL des cellules (après tout remplissage automatique
+    # ci-dessus), et ignore les lignes déjà entièrement repeintes en rouge (doublon complet ou
+    # résiduelle sans désignation ni prix) pour ne pas recouvrir ce rouge.
+    stats["champs_obligatoires_optionnels"] = signale_champs_obligatoires_optionnels(
+        ws, ligne_debut, col_marche, col_lot, col_designation, col_unite_ref, fournisseurs,
+        lignes_a_supprimer)
+
     applique_formatage_uniforme(ws, ligne_debut)
 
     return stats
@@ -2821,7 +3023,8 @@ def audite_classeur(wb_valeurs, wb, indice_prix=None):
                                                   info["col_poids_ref"], info["fournisseurs"])
         rapport = genere_rapport(ws, ws_valeurs, nom_feuille, info["ligne_debut_donnees"],
                                   info["col_designation"], info["col_unite_ref"],
-                                  info["col_poids_ref"], info["fournisseurs"], categories)
+                                  info["col_poids_ref"], info["fournisseurs"], categories,
+                                  info["col_lot"])
         resultats.append({
             "nom": nom_feuille,
             "fournisseurs": [f["nom"] for f in info["fournisseurs"]],
@@ -2871,8 +3074,9 @@ def main():
             stats = resultat["stats"]
             print(f"  Feuille '{nom_feuille}' : colonnes repérées ({', '.join(resultat['fournisseurs'])})")
 
-            total_marques = stats["marques"] + stats["lignes_dupliquees"] + stats["copies_possibles"]
-            print(f"    Lignes masquées réaffichées (résidu de filtre) : {stats['lignes_demasquees']}")
+            total_marques = (stats["marques"] + stats["lignes_dupliquees"]
+                              + stats["copies_possibles"] + stats["champs_obligatoires_optionnels"])
+            print(f"    Lignes/colonnes masquées réaffichées : {stats['lignes_demasquees']}")
             print(f"    Marché/Lot recopiés (lignes voisines identiques) : {stats['marche_lot_rempli']}")
             print(f"    Marché/Lot signalés (à préciser manuellement) : {stats['marche_lot_signale']}")
             print(f"    Lignes vides (ni désignation ni prix) peintes en rouge : {stats['lignes_vides_a_supprimer']}")
@@ -2880,6 +3084,7 @@ def main():
             print(f"    Unité de référence vide : {stats['unite_ref_vide']}")
             print(f"    Lignes dupliquées peintes en rouge : {stats['lignes_dupliquees']}")
             print(f"    Références en double : {stats['copies_possibles']}")
+            print(f"    Champs obligatoires/optionnels vides signalés : {stats['champs_obligatoires_optionnels']}")
             print(f"    Lignes avec incohérence signalée : {stats['lignes_avec_incoherence']}")
             print(f"    Total de cellules marquées : {total_marques}")
 

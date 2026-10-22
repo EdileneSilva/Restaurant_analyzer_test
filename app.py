@@ -151,7 +151,8 @@ if donnees:
 
             for resultat in fichier["resultats"]:
                 stats = resultat["stats"]
-                total_marques = stats["marques"] + stats["lignes_dupliquees"] + stats["copies_possibles"]
+                total_marques = (stats["marques"] + stats["lignes_dupliquees"]
+                                  + stats["copies_possibles"] + stats["champs_obligatoires_optionnels"])
 
                 with st.container(border=True):
                     st.markdown(
