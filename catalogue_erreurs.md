@@ -315,12 +315,22 @@ Le rapport `.md` liste maintenant, tout en haut, les valeurs UNIQUES de Lot (tri
 croissant du numéro de lot) et de chaque Fournisseur (espaces de début/fin comptés, pour
 repérer une variante qui devrait être identique à une autre mais ne l'est pas exactement).
 
-### 30. Tolérance de ratio resserrée de 5 % à 2 %
+### 30. Tolérance de ratio resserrée de 5 % à 2 %, puis réélargie à 3 %
 
 `TOLERANCE_RATIO` (utilisée partout pour confirmer qu'un ratio Prix commande ÷ Prix référence
-correspond à une quantité attendue) est passée de 5 % à 2 %, jugée trop permissive. Conséquence
-mesurée : 5 cellules en plus signalées sur `groupement 1` (des cas à 2-3,5 % d'écart,
-auparavant acceptés en silence), aucune perte de confirmation déjà posée ailleurs.
+correspond à une quantité attendue) est passée de 5 % à 2 % le 2026-10-22, jugée trop
+permissive. Conséquence mesurée : 5 cellules en plus signalées sur `groupement 1` (des cas à
+2-3,5 % d'écart, auparavant acceptés en silence), aucune perte de confirmation déjà posée
+ailleurs.
+
+**Mise à jour (2026-10-22, plus tard le même jour)** : 2 % s'est révélé trop strict à l'usage
+inverse — plusieurs cas réels avec un écart de 2-3 % (arrondis de pesée, conditionnement
+légèrement variable) étaient signalés à tort comme incohérents alors qu'ils sont normaux côté
+métier. Remontée à **3 %**, valeur actuelle de `motor.TOLERANCE_RATIO`, utilisée de façon
+identique dans `audit_general.py` et `audit_general_commentaires.py`. (Deux commentaires de
+code mentionnant encore "2%" à titre d'exemple historique subsistent dans `audit_general.py` —
+lignes ~1268 et ~1439 — ils documentent le raisonnement d'origine, pas la valeur actuellement
+appliquée ; à corriger si le code est retouché pour une autre raison.)
 
 ### 31. Bug corrigé — doublon complet qui ignorait la Désignation
 
@@ -340,28 +350,188 @@ différents du code (trouvé un par un, le même bug reproduit par plusieurs rè
 indépendantes) : la substitution directe de l'unité de commande, le cas "contenant à double
 imbrication" (CAS 3, règle n°10), et la détection de récipient imbriqué de premier niveau.
 
+## Erreurs et règles ajoutées depuis (2026-10-22 à 2026-10-26)
+
+### 33. Mot de récipient non reconnu par la base : remplacement automatique (`audit_general.py` seulement)
+
+Avant, un mot comme "COLIS" ou "CAGEOT" (absent de la liste fermée acceptée par la base
+d'intégration, voir `unites_commande_non_reconnues.md`) était seulement confirmé comme cohérent
+avec le conditionnement, jamais corrigé. **Décision métier appliquée** : dans
+`audit_general.py` uniquement, l'Unité de commande (et, le cas échéant, l'Unité de référence)
+est maintenant réécrite directement par son équivalent officiel (`motor.CONTENANT_ABREGE`,
+construit à partir de la colonne "Unité de remplacement" de `unites_commande_non_reconnues.xlsx`
+— ex. `colis → CARTON`, `cageot → PLATEAU`, `caisse → CARTON`, `pack → LOT`), avec un
+commentaire explicite ("'COLIS' n'étant pas reconnu par la base, remplacé par son équivalent
+officiel 'CARTON'"). Une abréviation d'un récipient déjà correct (ex. `bq → BARQUETTE`) est
+traitée pareil, dans le même dictionnaire.
+- **Choix volontaire et explicite** : cette règle ne s'applique **que** dans
+  `audit_general.py`. Dans `audit_general_commentaires.py` (version destinée à une personne non
+  technique), elle est désactivée : "la responsabilité de laisser l'unité correcte est celle de
+  l'équipe d'audit, pas de la personne qui remplit le fichier" — voir le docstring de ce
+  fichier et `format_cible.md`. La seule chose que `audit_general_commentaires.py` reconnaît,
+  c'est quand la personne a DÉJÀ écrit le mot officiellement correct (ex. "CARTON" alors que le
+  conditionnement dit "colis") : dans ce cas, aucune incohérence n'est signalée — c'est déjà le
+  résultat recherché.
+- **Gravité pressentie** : information (correction fiable, motivée par l'intégration, pas une
+  erreur de saisie).
+- **Couverte par le code** : oui, `audit_general.py` seulement (ajoutée le 2026-10-26).
+
+### 34. Format "BOITE N/M" reconnu comme catégorie de récipient à part entière
+
+- **Exemple réel** : conditionnement du type "BOITE 4/1", "BOITE 5/1" — avant, ce format
+  n'était rattaché à aucune catégorie connue et pouvait déclencher une incohérence Unité de
+  commande à tort, en plus du signalement légitime posé ailleurs.
+- **Correction appliquée** : `RE_FORMAT_BOITE` reconnaît ce motif et le rattache à la catégorie
+  "boite", qui est désormais acceptée comme cohérente avec une Unité de commande "BOITE".
+- **Gravité pressentie** : correction technique (évite un double-commentaire contradictoire sur
+  la même cellule), pas une erreur en soi.
+- **Couverte par le code** : oui (ajoutée le 2026-10-22, `reconsidere_format_boite`).
+
+### 35. "LOT DE N" : affinage et garde-fou contre la répétition
+
+Suite de la règle n°25 : l'Unité de commande "N PIECES" écrite telle quelle par le fournisseur
+(ex. "12 PIECES") est maintenant reconnue et convertie en "LOT DE N" **sauf si** l'Unité de
+commande actuelle est déjà "LOT" ou "LOT DE N" sous une autre forme — dans ce cas, aucun
+changement n'est proposé (évite de transformer une valeur déjà correcte en une formulation
+légèrement différente, qui serait un changement sans réel apport). Détection des comptages de
+pièces élargie à des formats libres ("6 BOTTES", "8U", "X20 U"), pas seulement "N pièces"/"N
+pieces" au sens strict.
+- **Gravité pressentie** : information (correction fiable).
+- **Couverte par le code** : oui.
+
+### 36. Validation d'un "Poids à l'unité de référence" déjà rempli (nouveau — avant, seule la case VIDE était vérifiée)
+
+- **Avant** : le script ne remplissait le "Poids à l'unité de référence" que lorsqu'il était
+  vide ; une valeur déjà présente n'était jamais recoupée avec le conditionnement ou la
+  désignation.
+- **Correction appliquée** : `reconsidere_poids_piece_existant` recoupe maintenant une valeur
+  déjà présente avec le poids déductible du conditionnement/de la désignation ; en cas d'écart,
+  la cellule est surlignée avec un commentaire ("le poids attendu semble plutôt être...") — la
+  valeur n'est JAMAIS réécrite automatiquement dans ce cas (contrairement au remplissage d'une
+  case vide, qui lui reste une écriture directe si confirmé par le ratio de prix).
+- **Gravité pressentie** : avertissement — à vérifier par une personne.
+- **Couverte par le code** : oui (ajoutée le 2026-10-22).
+
+### 37. Bug corrigé — mauvaise suggestion "SAC" par défaut sur légumes/fruits quand un vrai récipient figurait dans un texte "sale"
+
+- **Exemple réel** : `2026 09 22 Base article groupement commun.xlsx`, lignes 58-60 et 63 —
+  conditionnement du type "COLIS BOIS 4 KG 12 PIECES". `applique_defaut_legume` ne regardait que
+  le motif STRICT (`motor.mot_type_conditionnement`), qui échoue sur un texte aussi irrégulier,
+  concluait à tort "aucun récipient trouvé" et proposait "SAC" par défaut — alors qu'un
+  récipient ("COLIS") était bien nommé, juste dans un texte au format inhabituel.
+- **Correction appliquée** : le garde-fou vérifie maintenant AUSSI le motif souple
+  (`mot_contenant_dans_conditionnement`, recherche n'importe où dans le texte) avant de
+  conclure à l'absence de récipient — corrigé à la fois dans `audit_general.py` et
+  `audit_general_commentaires.py`.
+- **Gravité** : le changement erroné écrasait une Unité de commande déjà correcte
+  ("COLIS"/devenu "CARTON" une fois la règle n°33 appliquée) par "SAC", avec un commentaire
+  contradictoire — corrigé.
+- **Couverte par le code** : oui (corrigée le 2026-10-26).
+
+### 38. Bugs de double-commentaire corrigés (plusieurs cas indépendants)
+
+Motif récurrent ce lot-ci : deux mécanismes indépendants (le chemin principal qui décide d'un
+changement, et le garde-fou de fin de fonction `verifie_unite_commande_etendue`/
+`audite_fournisseur` qui revérifie la cohérence) arrivaient chacun à une conclusion différente
+sur la MÊME cellule, produisant deux commentaires empilés et contradictoires. Cas trouvés et
+corrigés un par un, par enrichissement du garde-fou (reconnaît maintenant aussi l'abréviation
+d'un récipient déjà correct, en plus du remplacement officiel pour un récipient non reconnu) :
+format BOITE N/M (règle n°34), BOCAL/POT (comparaison sur le texte littéral de l'Unité de
+commande, pas sur la catégorie regroupée qui aurait fait rater la comparaison), LOT/LOT DE N
+(règle n°35), et COLIS/CARTON/BARQUETTE (règles n°33 et 37 combinées — dernier cas trouvé :
+`audit_general_commentaires.py`, groupement commun ligne 7, "BQ DE 125 GR X 12" confirmé en
+"BARQUETTE", mais revérifié à tort contre une liste qui ne couvrait que les remplacements
+officiels, pas les abréviations).
+- **Couverte par le code** : oui, dans les deux fichiers, au fil des cas trouvés par tests de
+  non-régression sur les 7 fichiers (aucune duplication de commentaire restante au 2026-10-26,
+  vérifié par balayage automatique de tous les commentaires posés).
+
+### 39. Performance — propriétés `max_column`/`max_row` d'openpyxl recalculées à chaque ligne
+
+Bug de performance pur (zéro impact sur le résultat) : plusieurs fonctions
+(`marque_lignes_dupliquees`, `applique_formatage_uniforme`, `calcule_categories_rapport`, et le
+repérage des lignes vides dans `traite_feuille`) relisaient `ws.max_column`/`ws.max_row` à
+CHAQUE itération de leur boucle sur les lignes — ces propriétés ne sont pas mises en cache par
+openpyxl, chaque accès reparcourt toutes les cellules de la feuille. Sur les plus gros fichiers,
+le temps total des 7 fichiers combinés était passé d'environ 20 secondes à près de 2 minutes.
+Corrigé en mettant `max_column`/`max_row` dans une variable locale une seule fois avant chaque
+boucle. Ce même correctif technique a été appliqué dans les deux fichiers.
+
+### 40. `audit_general_commentaires.py` : liste d'exceptions mécaniques étendue
+
+Au-delà des corrections mécaniques déjà listées dans son propre docstring (voir le fichier
+lui-même, en-tête), deux écritures silencieuses supplémentaires ont été ajoutées ce lot-ci,
+dans le même esprit ("aucun jugement de contenu requis") : le remplissage du "Poids à l'unité
+de référence" vide (déjà silencieux dans `audit_general.py`, désormais avec un commentaire
+explicatif ici, par transparence envers un lecteur non technique) et la normalisation d'un
+synonyme pur d'unité de référence déjà dans la liste acceptée (kilo/kilogramme → KG, litre → L,
+pièce/piece → PC — jamais "Unité", qui reste un code à part entière). Le remplacement
+"mot non reconnu → équivalent officiel de la base" (règle n°33) reste volontairement exclu de
+ce fichier — seule son exception inverse (reconnaître que le mot déjà écrit EST l'équivalent
+officiel, et donc ne rien signaler) y est présente.
+
+### 41. ⚠️ Danger découvert en écrivant les tests (TT-09) — importer les deux scripts dans le même processus corrompt silencieusement leurs résultats
+
+`audit_general.py` et `audit_general_commentaires.py` partagent le même moteur
+(`first_scripts/first_attempt_v2_prototype.py`, importé comme `motor`) et **chacun écrase, dès
+son import, des constantes globales dessus** (`motor.CONTENANT_ABREGE`, `motor.TOLERANCE_RATIO`,
+etc. — voir en tête de chaque fichier, juste après les imports) avec SES PROPRES valeurs.
+Problème : comme `motor` n'est chargé qu'une seule fois par processus Python (mécanisme normal
+de `sys.modules`), si un même programme importe les DEUX scripts, le second import écrase
+silencieusement les constantes posées par le premier — sans aucune erreur, aucun avertissement.
+
+- **Repéré comment** : en écrivant un premier jet de tests de non-régression qui importait les
+  deux scripts dans le même fichier de test. Les totaux de `audit_general.py` tombaient de 234 à
+  204 lignes avec incohérence sur `groupement 3` (et des écarts similaires sur 3 autres
+  fichiers) selon que le test tournait seul ou après avoir importé
+  `audit_general_commentaires`.
+- **Confirmé** : `motor.CONTENANT_ABREGE['colis']` vaut `'CARTON'` juste après `import
+  audit_general`, mais devient `'COLIS'` dès qu'`audit_general_commentaires` est importé
+  ensuite dans le même interpréteur — alors que la variable manipulée est littéralement le même
+  objet Python (`ag.motor is agc.motor` → `True`).
+- **Pas un bug dans la logique métier des deux scripts** : chacun, utilisé seul (en CLI, ou
+  importé seul comme le fait `app.py`), se comporte correctement. Le risque n'existe que si un
+  même processus Python importe les deux.
+- **Mitigation appliquée** : `test_non_regression_audit_general.py` et
+  `test_non_regression_audit_commentaires.py` sont deux fichiers de test séparés, chacun
+  n'important qu'un seul des deux scripts, à lancer dans deux invocations `pytest` distinctes —
+  jamais ensemble.
+- **Point de vigilance pour la suite** : tout futur code qui aurait besoin des deux en même
+  temps (ex. un agent qui orchestrerait les deux versions, ou un test qui les comparerait) devra
+  isoler chaque appel dans son propre processus (`subprocess`, ou deux process `multiprocessing`
+  séparés) plutôt que de les importer tous les deux dans le même interpréteur.
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables, mesurés au
-2026-10-22 (après toutes les règles ci-dessus) :
+2026-10-26 (après toutes les règles ci-dessus, y compris n°33-39) :
 
 | Fichier | Lignes avec incohérence | Cellules marquées |
 |---|---|---|
-| Base article groupement 1 | 146 | 797 |
-| Base article groupement 2 | 256 | 826 |
-| Base article groupement 3 | 195 | 991 |
-| Base article groupement 4 | 154 | 959 |
-| Base article groupement 5 | 196 | 870 |
-| Base article groupement commun | 690 | 1260 |
-| MDC_IMPORT_MARCHE | 210 | 643 |
+| Base article groupement 1 | 183 | 809 |
+| Base article groupement 2 | 303 | 888 |
+| Base article groupement 3 | 234 | 1034 |
+| Base article groupement 4 | 198 | 1010 |
+| Base article groupement 5 | 219 | 896 |
+| Base article groupement commun | 772 | 1348 |
+| MDC_IMPORT_MARCHE | 194 | 720 |
 
-Ces chiffres servent de résultat attendu pour TT-09 (tests de non-régression) : si une
-future modification du code change ces totaux sans raison identifiée, c'est un signal
-de régression à investiguer. Les écarts importants avec les anciens chiffres (ex: groupement
-1 : 256→797 cellules) reflètent l'accumulation des nombreuses règles n°21-32 ci-dessus
-(notamment n°27, qui à elle seule ajoute plusieurs centaines de signalements par fichier),
-pas une régression — voir le détail de chaque règle pour la justification.
+Ces chiffres (`audit_general.py`, sortie dans `transformed_files/`) servent de résultat attendu
+pour TT-09 (tests de non-régression) : si une future modification du code change ces totaux
+sans raison identifiée, c'est un signal de régression à investiguer — voir
+`test_non_regression.py`, qui vérifie ces totaux automatiquement. Les écarts avec les chiffres
+précédents (mesurés au 2026-10-22) reflètent l'accumulation des règles n°33-38 ci-dessus
+(notamment n°33, le remplacement automatique des mots non reconnus par la base, qui ajoute un
+changement — donc une cellule marquée en plus — sur chaque ligne concernée), pas une
+régression.
+
+> `audit_general_commentaires.py` (sortie dans `commented_files/`) a ses propres totaux,
+> structurellement différents puisque cette version ne prend presque jamais de décision de
+> contenu (voir son docstring) : au 2026-10-26, 664 / 737 / 855 / 811 / 754 / 965 / 738
+> cellules marquées, dans le même ordre de fichiers que ci-dessus (total 5271 sur les 7
+> fichiers). Zéro doublon de commentaire et zéro changement sans effet réel (no-op) vérifiés
+> par balayage automatique sur les 7 fichiers à cette date.
 
 > Historique : les totaux de cellules marquées de groupement 1 et 2 sont passés de 247→255
 > et 419→427 le 2026-10-15, suite à l'ajout de la règle n°10 ci-dessus (contenant à double

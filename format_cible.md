@@ -6,12 +6,13 @@ règles déjà codées (`audit_general.py`, `pretraitement.py`). **À faire reli
 par le métier** (critère d'acceptation de l'US-02) avant de considérer ce document comme
 définitif.
 
-> **Mis à jour le 2026-10-22** pour refléter les règles effectivement codées à ce jour
-> (`audit_general.py`) : classification obligatoire/optionnel par colonne alignée sur
-> `signale_champs_obligatoires_optionnels`, vocabulaire de récipients très étendu pour
-> Unité de référence et Unité de commande, et distinction importante entre ce que l'outil
-> accepte en interne et ce que la base de données d'intégration reconnaît réellement (voir
-> `unites_commande_non_reconnues.md`).
+> **Mis à jour le 2026-10-26** pour refléter les règles effectivement codées à ce jour
+> (`audit_general.py` et `audit_general_commentaires.py`) : classification obligatoire/optionnel
+> par colonne alignée sur `signale_champs_obligatoires_optionnels`, vocabulaire de récipients
+> très étendu pour Unité de référence et Unité de commande, tolérance de ratio à 3 % (et non
+> plus 2 %, voir `catalogue_erreurs.md` règle n°30), et le remplacement automatique — devenu
+> effectif, pas seulement détecté — des mots non reconnus par la base (règle n°33, uniquement
+> dans `audit_general.py`).
 
 >Les fichiers `Base IANOR AGAPE 16 ...` sont
 > incomplets : colonne 6 absente, et texte légèrement différent sur les colonnes 4 et 5.
@@ -57,9 +58,9 @@ Prix de commande) est renseignée, les champs obligatoires encore vides sont mar
 
 ## ⚠️ Unité de commande acceptée par l'outil ≠ unité reconnue par la base de données
 
-L'outil (`audit_general.py`) tolère un vocabulaire de récipients volontairement très large pour
-Unité de référence et Unité de commande (voir `MOTS_CONTENANT`), construit au fil des fichiers
-réels rencontrés. **Ce n'est pas la même chose que la liste des unités que la base de données
+L'outil tolère en lecture un vocabulaire de récipients volontairement très large pour Unité de
+référence et Unité de commande (voir `MOTS_CONTENANT`), construit au fil des fichiers réels
+rencontrés. **Ce n'est pas la même chose que la liste des unités que la base de données
 d'intégration reconnaît réellement** : d'après l'échange avec l'équipe d'intégration, celle-ci
 n'accepte qu'une liste fermée de codes courts (ex. `C` pour Carton, `PAQ` pour Paquet, `U` pour
 Unité...), et toute valeur hors de cette liste devient `PIECE` par défaut lors de
@@ -70,9 +71,20 @@ commande, Unité de référence, et les mots de récipient détectés dans le Co
 cette liste fermée est tenue à jour dans
 [`unites_commande_non_reconnues.md`](unites_commande_non_reconnues.md) — 24 valeurs
 distinctes ne correspondent aujourd'hui à aucune unité reconnue (ex: `COLIS`, `CAGEOT`, `PU`,
-`FILET`, `BQT`, `PACK`, `COFFRET`...). Tant que ce mapping n'est pas décidé côté métier, le
-script ne transforme PAS automatiquement ces valeurs vers un code reconnu — il se contente de
-confirmer qu'elles correspondent bien au conditionnement/au ratio de prix.
+`FILET`, `BQT`, `PACK`, `COFFRET`...), avec en face la colonne "Unité de remplacement" qui donne
+l'équivalent officiel pour chacune.
+
+**Mise à jour 2026-10-26 — ce mapping est maintenant appliqué, mais différemment selon le
+script** (`catalogue_erreurs.md`, règle n°33) :
+- `audit_general.py` **réécrit directement** le mot non reconnu par son équivalent officiel
+  (ex. `COLIS → CARTON`, `CAGEOT → PLATEAU`), avec un commentaire expliquant pourquoi — cette
+  version est celle utilisée pour préparer l'intégration en base, donc responsable du résultat
+  final.
+- `audit_general_commentaires.py` **ne le fait volontairement pas** : laisser la bonne unité
+  est jugé être la responsabilité de l'équipe d'audit, pas de la personne qui remplit le
+  fichier et qui lit cette version. Il reconnaît seulement l'exception inverse (le mot déjà
+  écrit EST l'équivalent officiel attendu) pour ne pas signaler une incohérence qui n'en est
+  pas une.
 
 ## Bloc Allergènes (14 colonnes, une par allergène)
 

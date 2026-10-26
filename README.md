@@ -9,10 +9,25 @@ fournisseurs qui ne sont pas déjà dans ce format.
 - `app.py` — application Streamlit : dépôt de fichier(s), détection + transformation
   automatique si besoin, puis audit. Rien n'est écrit sur le serveur, tout se fait en
   mémoire.
-- `audit_general.py` — le script d'audit lui-même (logique de cohérence unités/prix). Peut
-
-  aussi être lancé en CLI (`python audit_general.py`) : lit tous les `.xlsx` de
-  `pret_pour_audit/` et écrit les fichiers audités + rapports dans `transformed_files/`.
+- `audit_general.py` — le script d'audit lui-même (logique de cohérence unités/prix), celui
+  utilisé par `app.py`. Peut aussi être lancé en CLI (`python audit_general.py`) : lit tous les
+  `.xlsx` de `pret_pour_audit/` et écrit les fichiers audités + rapports dans
+  `transformed_files/`.
+- `audit_general_commentaires.py` — variante de `audit_general.py` pour une personne qui ne
+  travaille pas sur ce fichier au quotidien : toute décision de contenu n'est que surlignée
+  avec un commentaire en langage courant, rien n'est changé (sauf une liste précise de
+  corrections purement mécaniques — voir le docstring en tête du fichier). N'est PAS importée
+  par `app.py` — uniquement en CLI (`python audit_general_commentaires.py`), lit le même
+  `pret_pour_audit/`, écrit dans `commented_files/`.
+- `test_non_regression_audit_general.py` / `test_non_regression_audit_commentaires.py` — tests
+  `pytest` (TT-09) qui vérifient que les totaux (lignes avec incohérence, cellules marquées)
+  produits par chacun des deux scripts ci-dessus, sur chacun des 7 fichiers de
+  `pret_pour_audit/`, correspondent aux totaux de référence documentés dans
+  `catalogue_erreurs.md`. **Toujours lancer séparément** (`pytest
+  test_non_regression_audit_general.py` puis, dans une autre commande,
+  `test_non_regression_audit_commentaires.py`) — jamais les deux dans la même invocation
+  pytest : voir `catalogue_erreurs.md` n°41 pour pourquoi (les deux scripts partagent et
+  écrasent au chargement les mêmes constantes du moteur commun).
 - `pretraitement.py` — transforme les catalogues au format REGAL vers le format canonique.
 - `pretraitement_grada.py` — transforme les catalogues de la famille GRADA (AGRICOURT, VDR,
   Boucherie) vers le format canonique.
@@ -36,6 +51,9 @@ fournisseurs qui ne sont pas déjà dans ce format.
   audités directement (`python audit_general.py`).
 - `transformed_files/` — sortie du mode CLI de `audit_general.py` (fichiers audités +
   rapports).
+- `commented_files/` — sortie du mode CLI de `audit_general_commentaires.py` (fichiers
+  commentés + rapports, même contenu de base que `transformed_files/` mais rédigé pour un
+  public non technique).
 - `useful_stuff/` — matériel de référence (pas des échantillons à auditer) : documents et
   modèles utilisés par l'ancienne référente du traitement manuel, pouvant être réutilisés.
 
@@ -55,6 +73,9 @@ Le détail fichier par fichier (source, date de réception, statut, anonymisatio
 - [`analyse_exploratoire.md`](analyse_exploratoire.md) — analyse ponctuelle (TT-03) de
   l'échantillon de fichiers reçus avant la mise en place du format canonique ; photo d'un
   instant donné, pas mise à jour au fil de l'eau.
+- [`suivi_user_stories_01_05.md`](suivi_user_stories_01_05.md) — état d'avancement détaillé des
+  US-01 à US-05 (critères d'acceptation un par un : fait / partiel / pas encore fait), avec
+  renvoi vers le document ou la ligne de code concerné pour chacun.
 
 ## Lancer l'app
 
