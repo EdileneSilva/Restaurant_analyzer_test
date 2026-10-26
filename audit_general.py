@@ -64,7 +64,7 @@ DOSSIER_SORTIE = os.path.join(DOSSIER_PROJET, "transformed_files")
 # fichier source partagé.
 # ============================================================================
 
-MOTS_CONTENANT = ["sac", "seau", "brique", "barquette", "barq", "bidon", "outre", "colis",
+MOTS_CONTENANT = ["sac", "seau", "brique", "barquette", "barq", "bq", "bidon", "outre", "colis",
                   "pot", "sachet", "carton", "poche", "cageot", "boite", "boîte", "filet",
                   "bouteille",
                   "bouteile",  # faute de frappe fréquente ('BOUTEILES', 1 seul L)
@@ -145,7 +145,7 @@ RE_QUANTITE_DESIGNATION = re.compile(rf"([\d,.]+)\s*({_UNITES_REGEX})(?![a-wyzà
 motor.CONTENANT_ABREGE = {
     # Déjà acceptés par la base : mot gardé tel quel.
     "sac": "SAC", "piece": "PIECE", "seau": "SEAU",
-    "barquette": "BARQUETTE", "barq": "BARQUETTE",
+    "barquette": "BARQUETTE", "barq": "BARQUETTE", "bq": "BARQUETTE",
     "bidon": "BIDON", "pot": "POT", "sachet": "SACHET",
     "carton": "CARTON", "poche": "POCHE", "bouteille": "BOUTEILLE", "bouteile": "BOUTEILLE",
     "boite": "BOITE", "boîte": "BOITE",
@@ -587,7 +587,7 @@ def determine_base_et_quantite(conditionnement):
 
 
 _MOTS_CONTENANT_CANONIQUES = [
-    "sac", "seau", "brique", "barquette", "bidon", "outre", "colis", "pot", "sachet",
+    "sac", "seau", "brique", "barquette", "bq", "bidon", "outre", "colis", "pot", "sachet",
     "carton", "poche", "cageot", "boite", "boîte", "filet", "bouteille", "caisse", "plaque",
     "plateau", "clayette", "bac", "coffret", "plaquette", "paquet", "etui", "étui", "bombe",
     "bocal", "flacon", "tube",
@@ -767,7 +767,7 @@ def reconsidere_poids_piece_existant(resultat, poids_ref, unite_ref, conditionne
 RE_N_PIECES_UNITE_CMD = re.compile(r"^(\d+)\s*pi[eè]ces?$", re.I)
 
 
-def reconsidere_lot_pieces_brutes(resultat):
+def reconsidere_lot_pieces_brutes(resultat, unite_cmd):
     """Quand l'unité de commande finalement proposée n'est qu'un décompte brut recopié du
     conditionnement (ex: '2 PIECES', sans aucun récipient nommé — cf. '2 PIECES DE 2 KG') : ce
     n'est pas une vraie unité, juste le texte du conditionnement répété. On la fait passer par
@@ -780,12 +780,127 @@ def reconsidere_lot_pieces_brutes(resultat):
     m = RE_N_PIECES_UNITE_CMD.match(valeur.strip())
     if not m:
         return
+    if motor.normalise_texte(unite_cmd) == "lot":
+        # Déjà 'LOT' tel quel à l'origine : le résultat de cette règle finit de toute façon
+        # réécrit en 'LOT' nu à l'écriture — proposer 'LOT DE N' ne ferait que signaler un
+        # changement de texte qui, une fois réduit à 'LOT', n'en est pas un.
+        resultat.nouveau_l = None
+        resultat.couleur_l = None
+        resultat.commentaire_l = None
+        return
     resultat.nouveau_l = f"LOT DE {m.group(1)}"
     resultat.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
     resultat.commentaire_l = (
         f"Unité de commande '{valeur}' n'est qu'un décompte recopié du conditionnement, pas "
         "une vraie unité — regroupée sous 'LOT' (le nombre reste visible dans le "
         "Conditionnement).")
+
+
+RE_NOMBRE_PIECES_LIBRE = re.compile(rf"(\d+)\s*(?:(?:{_MOTS_REGEX})s?|u\.?|unit[eé]s?)\b", re.I)
+
+
+def reconsidere_contenant_texte_libre(resultat, unite_ref, unite_cmd, conditionnement,
+                                       prix_ref, prix_cmd):
+    """Dernier recours, quand aucun motif propre (piece_carton_candidats /
+    determine_base_et_quantite) n'a permis de décider l'unité de commande — le conditionnement
+    a une forme trop irrégulière pour être compris d'un bloc (ex: 'COLIS BOIS 5 KG 14 PIECES' :
+    poids ET nombre de pièces mélangés sans connecteur, le mot qualificatif 'BOIS' cassant le
+    motif strict). On cherche quand même le premier mot de récipient nommé dans le texte, et on
+    vérifie si le ratio Prix commande ÷ Prix référence correspond À UN DES NOMBRES présents
+    (poids si l'unité de référence finit en kg/L, nombre de pièces si elle est à la pièce) :
+    si oui, ce mot devient l'unité de commande (son remplacement officiel s'il n'est pas
+    reconnu par la base)."""
+    if resultat.nouveau_l is not None or not conditionnement or not prix_ref or not prix_cmd:
+        return
+    mot = mot_contenant_dans_conditionnement(conditionnement)
+    if not mot:
+        return
+    d_final = resultat.nouveau_d if resultat.nouveau_d is not None else unite_ref
+    base_d = motor.normalise_texte(d_final) if d_final else None
+    ratio = prix_cmd / prix_ref
+    confirme = False
+    if base_d in ("kg", "l", "litre"):
+        for qty_str, unite_str in motor.RE_LIBRE.findall(conditionnement):
+            if motor.base_depuis_unite(unite_str) != ("kg" if base_d == "kg" else "l"):
+                continue
+            try:
+                valeur = motor._nombre(qty_str)
+            except (KeyError, ValueError):
+                continue
+            if valeur > 0 and abs(ratio - valeur) <= motor.TOLERANCE_RATIO * valeur:
+                confirme = True
+                break
+    elif base_d == "pc":
+        # Le mot de comptage n'est pas toujours 'pièces' littéralement — '6 BOTTES', '8U'
+        # (unités), 'X20 U' sont tout aussi valables : n'importe quel mot de récipient connu
+        # (botte, sac, carton...) ou l'abréviation 'U'/'unité(s)' juste après le nombre compte
+        # comme un décompte de pièces pour cette vérification.
+        for n_str in RE_NOMBRE_PIECES_LIBRE.findall(conditionnement):
+            valeur = int(n_str)
+            if valeur > 0 and abs(ratio - valeur) <= motor.TOLERANCE_RATIO * valeur:
+                confirme = True
+                break
+    if not confirme:
+        return
+    l_novo = motor.CONTENANT_ABREGE.get(mot, mot.upper())
+    if motor.normalise_texte(l_novo) == motor.normalise_texte(unite_cmd):
+        return
+    resultat.nouveau_l = l_novo
+    resultat.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+    resultat.commentaire_l = (
+        f"Unité de commande précisée en '{l_novo}' : le ratio Prix commande ÷ Prix référence "
+        f"({prix_cmd} ÷ {prix_ref} = {round(ratio, 3)}) correspond à un nombre présent dans le "
+        f"conditionnement ('{conditionnement}'), même si son écriture inhabituelle (mot "
+        "qualificatif, poids et nombre de pièces mélangés...) empêche de le reconnaître comme "
+        "un motif strict.")
+
+
+def reconsidere_mot_litteral_non_reconnu(resultat, unite_cmd, conditionnement):
+    """Quand rien d'autre n'a tranché l'unité de commande (ex: le prix ne confirme rien de
+    précis — voir reconsidere_prix_inexplique, une question SÉPARÉE) mais que le conditionnement
+    nomme littéralement le MÊME récipient que celui déjà écrit (ex: 'COLIS BOIS 4 KG 12 PIECES',
+    unité de commande déjà 'COLIS') : il n'y a aucune ambiguïté sur LEQUEL est le bon récipient,
+    seulement sur son acceptation par la base. On applique directement le remplacement officiel
+    (CONTENANT_ABREGE), indépendamment de la cohérence du prix, qui reste signalée à part si
+    besoin."""
+    if resultat.nouveau_l is not None or not conditionnement or not unite_cmd:
+        return
+    mot = mot_contenant_dans_conditionnement(conditionnement)
+    if not mot or motor.normalise_texte(mot) != motor.normalise_texte(unite_cmd):
+        return  # pas le mot déjà écrit : une vraie incohérence éventuelle, pas visée ici
+    remplacement = motor.CONTENANT_ABREGE.get(mot, mot.upper())
+    if motor.normalise_texte(remplacement) == motor.normalise_texte(mot):
+        return  # déjà accepté tel quel par la base, rien à faire
+    resultat.nouveau_l = remplacement
+    resultat.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
+    resultat.commentaire_l = (
+        f"Unité de commande changée en '{remplacement}' : '{mot.upper()}' n'est pas une unité "
+        "reconnue par la base, remplacé par son équivalent officiel.")
+
+
+def ajoute_note_remplacement_officiel(resultat, conditionnement, unite_cmd):
+    """Quand l'unité de commande finale correspond au remplacement officiel d'un mot non
+    reconnu par la base (ex: 'COLIS' -> 'CARTON', voir CONTENANT_ABREGE et
+    unites_commande_non_reconnues.xlsx), précise cette raison précise à la fin du commentaire
+    déjà posé — sinon le commentaire ne dit que 'd'après le conditionnement', sans jamais
+    préciser que le mot d'origine n'était pas le problème, seulement son absence de la liste
+    officielle. Dernier passage, après toutes les autres règles qui décident l'unité de
+    commande (quel que soit le motif qui l'a proposée)."""
+    if not resultat.nouveau_l or not resultat.commentaire_l or not conditionnement:
+        return
+    if "équivalent officiel" in resultat.commentaire_l:
+        return  # déjà précisé
+    mot = mot_contenant_dans_conditionnement(conditionnement)
+    if not mot:
+        return
+    remplacement = motor.CONTENANT_ABREGE.get(mot, mot.upper())
+    if motor.normalise_texte(remplacement) == motor.normalise_texte(mot):
+        return  # pas un remplacement officiel, juste la même orthographe normalisée
+    if motor.normalise_texte(remplacement) != motor.normalise_texte(resultat.nouveau_l):
+        return  # ce remplacement-là n'est pas ce qui a été écrit ici, pas la bonne explication
+    resultat.commentaire_l += (
+        f" ('{mot.upper()}' n'étant pas reconnu par la base, remplacé par son équivalent "
+        f"officiel '{remplacement}').")
 
 
 def traite_ligne_etendue(unite_ref, poids_ref, designation, conditionnement, unite_cmd,
@@ -797,9 +912,13 @@ def traite_ligne_etendue(unite_ref, poids_ref, designation, conditionnement, uni
     resultat = _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnement,
                                              unite_cmd, prix_ref, prix_cmd, desig_fourn)
     reconsidere_format_boite(resultat, conditionnement, unite_cmd)
-    reconsidere_lot_pieces_brutes(resultat)
+    reconsidere_lot_pieces_brutes(resultat, unite_cmd)
     reconsidere_poids_piece_existant(resultat, poids_ref, unite_ref, conditionnement,
                                       designation, desig_fourn)
+    reconsidere_contenant_texte_libre(resultat, unite_ref, unite_cmd, conditionnement,
+                                       prix_ref, prix_cmd)
+    reconsidere_mot_litteral_non_reconnu(resultat, unite_cmd, conditionnement)
+    ajoute_note_remplacement_officiel(resultat, conditionnement, unite_cmd)
 
     # Garde-fou : une couleur posée sans commentaire (oubli dans motor.traite_ligne, ex: la
     # conversion PC -> KG par poids de référence ne renseigne que commentaire_k) rendrait la
@@ -956,11 +1075,15 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
 
         if (candidat_ok is not None and candidat_ok == total_pieces
                 and mot_piece in (None, "lot")
-                and motor.normalise_texte(unite_cmd) != f"lot de {total_pieces}"):
+                and motor.normalise_texte(unite_cmd) not in (f"lot de {total_pieces}", "lot")):
             # Aucun récipient PHYSIQUE nommé dans le conditionnement — soit aucun mot du tout
             # ('100 x 10g', '4 x 125g'), soit le marqueur 'lot' ('LOT DE 4 PIECES', qui ne
             # désigne pas un récipient mais directement un lot) — le ratio confirme bien un
-            # LOT de N pièces, pas un poids total à recalculer.
+            # LOT de N pièces, pas un poids total à recalculer. Exclut aussi 'unite_cmd' déjà
+            # à 'LOT' tout court (pas 'LOT DE N') : le résultat de cette règle finit de toute
+            # façon réécrit en 'LOT' nu à l'écriture (voir plus bas, 'LOT DE N' -> 'LOT') — si
+            # c'est déjà ce qui est écrit, proposer 'LOT DE N' ne ferait que signaler un
+            # changement de texte qui, une fois réduit à 'LOT', n'en est pas un.
             r.nouveau_l = f"LOT DE {total_pieces}"
             r.couleur_l = motor.COULEUR_UNITE_TRANSFORMEE
             r.commentaire_l = (
@@ -1813,6 +1936,12 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
         return True, None
     if re.match(r"^\d+\s*pi[eè]ces?$", cat):
         return True, None
+    if cat == "lot" and re.search(r"\blots?\b", cond):
+        # 'LOT' nu (pas 'LOT DE N') : c'est la forme finale normale une fois le nombre reporté
+        # dans le Conditionnement (voir 'LOT DE N' -> 'LOT' dans audite_fournisseur) — le
+        # nombre ne vit plus dans l'unité de commande elle-même, donc pas la peine de le
+        # retrouver ici : la présence du mot 'lot' dans le conditionnement suffit à confirmer.
+        return True, None
     m_lot = re.match(r"^lot de (\d+)$", cat)
     if m_lot:
         n = int(m_lot.group(1))
@@ -1823,7 +1952,7 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
         if n in nombres or any(a * b == n for i, a in enumerate(nombres) for b in nombres[i + 1:]):
             return True, None
 
-    mots_types = ["sac", "pièce", "piece", "seau", "brique", "barquette", "barq", "bidon",
+    mots_types = ["sac", "pièce", "piece", "seau", "brique", "barquette", "barq", "bq", "bidon",
                   "outre", "colis", "pot", "sachet", "carton", "poche", "bouteille", "bouteile",
                   "cageot", "boite", "boîte", "filet", "caisse", "plaque", "plateau", "clayette",
                   "bac", "coffret", "plaquette", "paquet", "etui", "étui", "bombe",
@@ -2168,7 +2297,13 @@ def applique_defaut_legume(resultat, lot_valor, designation, conditionnement, un
         return
     if not lot_valor or not RE_CATEGORIE_LEGUME.search(str(lot_valor)):
         return
-    if motor.mot_type_conditionnement(conditionnement):
+    # 'motor.mot_type_conditionnement' n'utilise que des motifs stricts (toute la chaîne doit
+    # correspondre) : un texte irrégulier ('COLIS BOIS 4 KG 12 PIECES', qualificatif + poids ET
+    # nombre de pièces mélangés) le fait échouer à tort, alors que le récipient ('colis') est
+    # bel et bien nommé — 'mot_contenant_dans_conditionnement' (recherche en texte libre, pas
+    # de motif strict) le retrouve. Sans cette deuxième vérification, on devinerait 'SAC' par
+    # défaut alors qu'un vrai récipient est déjà écrit.
+    if motor.mot_type_conditionnement(conditionnement) or mot_contenant_dans_conditionnement(conditionnement):
         return  # le conditionnement donne déjà un mot de récipient, pas besoin de deviner
     mot_designation = motor.cherche_unite_designation(designation)
     nouveau_l = mot_designation or "SAC"
