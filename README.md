@@ -37,7 +37,7 @@ fournisseurs qui ne sont pas déjà dans ce format.
   traitement. `detecte_statut()` expose le vocabulaire US-06 (`deja_au_format`/`formatable`/
   `non_formatable`) ; `transforme_automatiquement()` renvoie en plus une liste de causes
   structurées (`{code, message, onglet, colonne, cellule}`) quand le résultat est
-  `non_formatable` — voir US-06 dans `suivi_user_stories_01_06.md` et
+  `non_formatable` — voir US-06 dans `suivi_user_stories_01_07.md` et
   `detection_format_causes.md`.
 - `pretraitement_a_formater.py` — transforme les fichiers bruts de `a_formater/` qui ne sont
   pas déjà pris en charge par les deux scripts ci-dessus (familles BPU DQE, Passion Froid,
@@ -50,6 +50,12 @@ fournisseurs qui ne sont pas déjà dans ce format.
   utilisée par `pretraitement.py`, `pretraitement_grada.py`, `pretraitement_a_formater.py` et
   `pretraitement_auto.py` pour signaler un format invalide sans juste planter l'appelant
   (US-06.2/.3). Fichier séparé pour éviter un import circulaire entre ces scripts.
+- `test_non_regression_pretraitement.py` — test `pytest` (US-07) qui vérifie, sur les 21
+  fichiers connus de `a_formater/` (paramétré), que `pretraitement_auto.
+  transforme_automatiquement()` ne modifie jamais le fichier d'origine, que le fichier produit
+  est reconnu `deja_au_format`, et que son nombre de lignes correspond au total de référence.
+  N'importe ni `audit_general` ni `audit_general_commentaires` : peut être lancé seul ou avec
+  n'importe lequel des deux tests d'audit ci-dessus (voir US-07 dans `suivi_user_stories_01_07.md`).
 - `first_scripts/first_attempt_v2_prototype.py` — règles de cohérence déjà validées,
   réutilisées telles quelles par `audit_general.py` (import direct, ne pas supprimer).
 
@@ -102,8 +108,8 @@ Le détail fichier par fichier (source, date de réception, statut, anonymisatio
 - [`analyse_exploratoire.md`](analyse_exploratoire.md) — analyse ponctuelle (TT-03) de
   l'échantillon de fichiers reçus avant la mise en place du format canonique ; photo d'un
   instant donné, pas mise à jour au fil de l'eau.
-- [`suivi_user_stories_01_06.md`](suivi_user_stories_01_06.md) — état d'avancement détaillé des
-  US-01 à US-06 (critères d'acceptation un par un : fait / partiel / pas encore fait), avec
+- [`suivi_user_stories_01_07.md`](suivi_user_stories_01_07.md) — état d'avancement détaillé des
+  US-01 à US-07 (critères d'acceptation un par un : fait / partiel / pas encore fait), avec
   renvoi vers le document ou la ligne de code concerné pour chacun.
 - [`detection_format_causes.md`](detection_format_causes.md) — préparation d'US-06 : vocabulaire
   de statut (`deja_au_format`/`formatable`/`non_formatable`) et catalogue de causes proposés,
