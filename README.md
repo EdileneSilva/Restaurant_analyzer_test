@@ -94,6 +94,11 @@ Le détail fichier par fichier (source, date de réception, statut, anonymisatio
 - [`unites_commande_non_reconnues.md`](unites_commande_non_reconnues.md) — écart entre les
   unités tolérées par l'outil et celles réellement acceptées par la base de données
   d'intégration.
+- [`mapping_colonnes_a_formater.md`](mapping_colonnes_a_formater.md) — version Markdown
+  (suivie par git) de `mapping_colonnes_a_formater.xlsx` (non suivi : `.xlsx`, ignoré par
+  `.gitignore`) : correspondance colonne par colonne entre le format canonique et chacun des
+  10 formats fournisseurs de `a_formater/`, avec les décisions de mapping déjà tranchées en
+  notes. À relire et mettre à jour manuellement si le `.xlsx` change.
 - [`analyse_exploratoire.md`](analyse_exploratoire.md) — analyse ponctuelle (TT-03) de
   l'échantillon de fichiers reçus avant la mise en place du format canonique ; photo d'un
   instant donné, pas mise à jour au fil de l'eau.
