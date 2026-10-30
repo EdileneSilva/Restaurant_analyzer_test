@@ -125,9 +125,13 @@ Le détail fichier par fichier (source, date de réception, statut, anonymisatio
 - [`suivi_user_stories_01_08.md`](suivi_user_stories_01_08.md) — état d'avancement détaillé des
   US-01 à US-08 (critères d'acceptation un par un : fait / partiel / pas encore fait), avec
   renvoi vers le document ou la ligne de code concerné pour chacun.
-- [`detection_format_causes.md`](detection_format_causes.md) — préparation d'US-06 : vocabulaire
-  de statut (`deja_au_format`/`formatable`/`non_formatable`) et catalogue de causes proposés,
-  à partir des échecs déjà codés dans les scripts de prétraitement. Spec, rien d'implémenté.
+- [`detection_format_causes.md`](detection_format_causes.md) — US-06 : vocabulaire de statut
+  (`deja_au_format`/`formatable`/`non_formatable`) et catalogue de causes, à partir des échecs
+  déjà codés dans les scripts de prétraitement — implémenté le 2026-10-30 (`causes_format.py`).
+- [`test_manuel_streamlit.md`](test_manuel_streamlit.md) — guide de test MANUEL (US-08.3/US-05.3 :
+  validation par le métier sur des fichiers réels, jamais tracée jusqu'ici) : user story +
+  checklist pour déposer un échantillon de fichiers dans l'app et vérifier à l'œil que le
+  formatage ET les deux modes d'audit sont cohérents avec les fichiers source.
 
 ## Lancer l'app
 
