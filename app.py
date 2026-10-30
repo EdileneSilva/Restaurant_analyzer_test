@@ -24,6 +24,48 @@ TITRE_POIDS_COMMENTAIRES = "Poids à l'unité de référence — suggestion (rie
 
 st.set_page_config(page_title="Audit BPU — démo", page_icon="📋", layout="wide")
 
+# Charte graphique alignée sur ianord.fr (couleurs + police "Inter" relevées sur le site) —
+# complète le thème défini dans .streamlit/config.toml, que Streamlit ne permet pas d'étendre
+# davantage (polices/arrondis/badges) sans un peu de CSS.
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
+
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+
+    h1, h2, h3 { color: #34415A; }
+
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 10px !important;
+        box-shadow: 0 1px 4px rgba(52, 65, 90, 0.08);
+    }
+
+    .stButton > button, .stDownloadButton > button {
+        border-radius: 8px;
+        font-weight: 600;
+    }
+
+    .mode-badge {
+        display: inline-block;
+        padding: 0.15rem 0.75rem;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        font-weight: 700;
+        background: #F6F3EA;
+        color: #8A6D00;
+        border: 1px solid #D9A605;
+    }
+    .mode-badge.commentaires {
+        background: #EEF1F4;
+        color: #34415A;
+        border-color: #34415A;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("📋 Audit de cohérence unités/prix")
 st.caption(
     "Dépose un ou plusieurs fichiers .xlsx : déjà au format canonique "
@@ -73,7 +115,12 @@ if donnees:
     if mode:
         libelle_mode = ("complet (corrections + surlignage)" if mode == "complet"
                          else "commentaires seulement (rien n'est changé, sauf le mécanique)")
-        st.caption(f"Mode d'audit utilisé pour ce résultat : **{libelle_mode}**")
+        classe_badge = "" if mode == "complet" else "commentaires"
+        st.markdown(
+            f"Mode d'audit utilisé pour ce résultat : "
+            f'<span class="mode-badge {classe_badge}">{libelle_mode}</span>',
+            unsafe_allow_html=True,
+        )
 
     for message in donnees["erreurs"]:
         st.error(message)
@@ -90,7 +137,7 @@ if donnees:
 
         for fichier in donnees["fichiers"]:
             st.divider()
-            st.subheader(fichier["nom"])
+            st.subheader(f"📄 {fichier['nom']}")
 
             if not fichier["resultats"]:
                 st.warning("Aucune feuille reconnue dans ce fichier (format inattendu) — ignoré.")
@@ -102,8 +149,9 @@ if donnees:
                                   + stats["copies_possibles"] + stats["champs_obligatoires_optionnels"])
 
                 with st.container(border=True):
+                    icone_statut = "✅" if stats["lignes_avec_incoherence"] == 0 else "⚠️"
                     st.markdown(
-                        f"**Feuille « {resultat['nom']} » — "
+                        f"{icone_statut} **Feuille « {resultat['nom']} » — "
                         f"{stats['lignes_avec_incoherence']} ligne(s) avec incohérence, "
                         f"{total_marques} cellule(s) marquée(s)**"
                     )
