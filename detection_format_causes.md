@@ -4,7 +4,7 @@
 partir d'échecs **déjà codés**, pas inventés), **implémenté le 2026-10-30** tel que décrit
 ci-dessous, avec l'accord explicite du métier pour toucher les scripts protégés
 (`pretraitement.py`, `pretraitement_grada.py`, `pretraitement_auto.py`) que ça impliquait. Voir
-[`suivi_user_stories_01_07.md`](suivi_user_stories_01_07.md) pour le statut des 3 critères.
+[`suivi_user_stories_01_08.md`](suivi_user_stories_01_08.md) pour le statut des 3 critères.
 
 ## 1. Statuts (US-06, critère 1) — implémenté
 
@@ -81,4 +81,4 @@ zone de lignes cherchée en `cellule`.
   tant qu'il n'est pas ajouté à un registre dans `pretraitement_a_formater.py`. Les 8 fichiers
   arrivés le 2026-10-30 (Vivalya, SYSCO FRANCE, Agricourt, et des DADS/Passion Froid MP
   ARDECHE 24 supplémentaires) ont déjà été traités le même jour — voir
-  `suivi_user_stories_01_07.md`, section "Ce qui bloque le plus".
+  `suivi_user_stories_01_08.md`, section "Ce qui bloque le plus".

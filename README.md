@@ -7,18 +7,32 @@ fournisseurs qui ne sont pas déjà dans ce format.
 ## Scripts
 
 - `app.py` — application Streamlit : dépôt de fichier(s), détection + transformation
-  automatique si besoin, puis audit. Rien n'est écrit sur le serveur, tout se fait en
-  mémoire.
-- `audit_general.py` — le script d'audit lui-même (logique de cohérence unités/prix), celui
-  utilisé par `app.py`. Peut aussi être lancé en CLI (`python audit_general.py`) : lit tous les
-  `.xlsx` de `pret_pour_audit/` et écrit les fichiers audités + rapports dans
-  `transformed_files/`.
+  automatique si besoin, puis audit — au choix entre deux boutons/moteurs (voir
+  `audit_pipeline.py`). Propose 3 téléchargements par fichier : le fichier formaté (juste après
+  prétraitement, avant audit), et le fichier audité (dans le mode choisi). Rien n'est écrit sur
+  le serveur, tout se fait en mémoire.
+- `audit_pipeline.py` — chaîne complète détection + formatage + audit (US-08), réutilisable
+  telle quelle par `app.py` ou par un futur agent (US-09) : n'importe pas `streamlit`, prend une
+  liste de `(nom, contenu_bytes)` (pas un objet d'interface). Deux fonctions, un moteur chacune :
+  `calcule_resultats` (`audit_general`, en mémoire) et `calcule_resultats_commentaires`
+  (`audit_general_commentaires`, dans un sous-processus séparé via `audit_commentaires_worker.py`
+  — les deux moteurs d'audit ne peuvent jamais être importés dans le même processus, voir plus
+  bas et `catalogue_erreurs.md` n°41).
+- `audit_general.py` — le script d'audit lui-même (logique de cohérence unités/prix), moteur
+  "complet" (corrections mécaniques + surlignage) utilisé par `app.py` via `audit_pipeline.py`.
+  Peut aussi être lancé en CLI (`python audit_general.py`) : lit tous les `.xlsx` de
+  `pret_pour_audit/` et écrit les fichiers audités + rapports dans `transformed_files/`.
 - `audit_general_commentaires.py` — variante de `audit_general.py` pour une personne qui ne
   travaille pas sur ce fichier au quotidien : toute décision de contenu n'est que surlignée
   avec un commentaire en langage courant, rien n'est changé (sauf une liste précise de
-  corrections purement mécaniques — voir le docstring en tête du fichier). N'est PAS importée
-  par `app.py` — uniquement en CLI (`python audit_general_commentaires.py`), lit le même
-  `pret_pour_audit/`, écrit dans `commented_files/`.
+  corrections purement mécaniques — voir le docstring en tête du fichier). Utilisée par `app.py`
+  (bouton "commentaires seulement") via `audit_pipeline.calcule_resultats_commentaires`, mais
+  TOUJOURS dans un sous-processus séparé (`audit_commentaires_worker.py`), jamais importée
+  directement dans le même processus que `audit_general`. Lancable aussi en CLI (`python
+  audit_general_commentaires.py`), lit le même `pret_pour_audit/`, écrit dans `commented_files/`.
+- `audit_commentaires_worker.py` — petit script CLI (`python audit_commentaires_worker.py
+  <dossier_entree> <dossier_sortie>`), le sous-processus isolé ci-dessus : n'importe QUE
+  `audit_general_commentaires`, jamais appelé directement par une personne.
 - `test_non_regression_audit_general.py` / `test_non_regression_audit_commentaires.py` — tests
   `pytest` (TT-09) qui vérifient que les totaux (lignes avec incohérence, cellules marquées)
   produits par chacun des deux scripts ci-dessus, sur chacun des 7 fichiers de
@@ -37,7 +51,7 @@ fournisseurs qui ne sont pas déjà dans ce format.
   traitement. `detecte_statut()` expose le vocabulaire US-06 (`deja_au_format`/`formatable`/
   `non_formatable`) ; `transforme_automatiquement()` renvoie en plus une liste de causes
   structurées (`{code, message, onglet, colonne, cellule}`) quand le résultat est
-  `non_formatable` — voir US-06 dans `suivi_user_stories_01_07.md` et
+  `non_formatable` — voir US-06 dans `suivi_user_stories_01_08.md` et
   `detection_format_causes.md`.
 - `pretraitement_a_formater.py` — transforme les fichiers bruts de `a_formater/` qui ne sont
   pas déjà pris en charge par les deux scripts ci-dessus (familles BPU DQE, Passion Froid,
@@ -55,7 +69,7 @@ fournisseurs qui ne sont pas déjà dans ce format.
   transforme_automatiquement()` ne modifie jamais le fichier d'origine, que le fichier produit
   est reconnu `deja_au_format`, et que son nombre de lignes correspond au total de référence.
   N'importe ni `audit_general` ni `audit_general_commentaires` : peut être lancé seul ou avec
-  n'importe lequel des deux tests d'audit ci-dessus (voir US-07 dans `suivi_user_stories_01_07.md`).
+  n'importe lequel des deux tests d'audit ci-dessus (voir US-07 dans `suivi_user_stories_01_08.md`).
 - `first_scripts/first_attempt_v2_prototype.py` — règles de cohérence déjà validées,
   réutilisées telles quelles par `audit_general.py` (import direct, ne pas supprimer).
 
@@ -108,8 +122,8 @@ Le détail fichier par fichier (source, date de réception, statut, anonymisatio
 - [`analyse_exploratoire.md`](analyse_exploratoire.md) — analyse ponctuelle (TT-03) de
   l'échantillon de fichiers reçus avant la mise en place du format canonique ; photo d'un
   instant donné, pas mise à jour au fil de l'eau.
-- [`suivi_user_stories_01_07.md`](suivi_user_stories_01_07.md) — état d'avancement détaillé des
-  US-01 à US-07 (critères d'acceptation un par un : fait / partiel / pas encore fait), avec
+- [`suivi_user_stories_01_08.md`](suivi_user_stories_01_08.md) — état d'avancement détaillé des
+  US-01 à US-08 (critères d'acceptation un par un : fait / partiel / pas encore fait), avec
   renvoi vers le document ou la ligne de code concerné pour chacun.
 - [`detection_format_causes.md`](detection_format_causes.md) — préparation d'US-06 : vocabulaire
   de statut (`deja_au_format`/`formatable`/`non_formatable`) et catalogue de causes proposés,
