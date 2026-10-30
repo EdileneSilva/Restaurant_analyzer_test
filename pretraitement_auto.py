@@ -1,17 +1,27 @@
 """
 Point d'entrée unique de prétraitement : détecte automatiquement le format
-d'un fichier déposé (REGAL, famille GRADA, ou déjà au format canonique de
-raw_data/) et le transforme en conséquence — pensé pour être appelé une
-seule fois par fichier, aussi bien en CLI qu'depuis l'app Streamlit, juste
-avant de passer le résultat à audit_general.py.
+d'un fichier déposé (REGAL, famille GRADA, une des 5 familles de a_formater/,
+ou déjà au format canonique de raw_data/) et le transforme en conséquence —
+pensé pour être appelé une seule fois par fichier, aussi bien en CLI qu'depuis
+l'app Streamlit, juste avant de passer le résultat à audit_general.py.
 
-Ne modifie ni pretraitement.py (REGAL) ni pretraitement_grada.py
-(AGRICOURT/VDR/Boucherie) : réutilise leurs fonctions. La partie GRADA est
-en plus généralisée ici en UNE SEULE fonction (transforme_fichier_grada_auto)
-qui couvre les trois variantes déjà écrites séparément dans
-pretraitement_grada.py, en repérant tout dynamiquement (tag, texte d'en-tête,
-feuille) — ces trois fonctions d'origine restent telles quelles, inchangées,
-au cas où il faille revenir dessus.
+Ne modifie pas la LOGIQUE de pretraitement.py (REGAL), pretraitement_grada.py
+(AGRICOURT/VDR/Boucherie) ni pretraitement_a_formater.py (BPU DQE/Passion
+Froid/Episaveurs/BPUR FRESCA/MP ARDECHE 24) : réutilise leurs fonctions. La
+partie GRADA est en plus généralisée ici en UNE SEULE fonction
+(transforme_fichier_grada_auto) qui couvre les trois variantes déjà écrites
+séparément dans pretraitement_grada.py, en repérant tout dynamiquement (tag,
+texte d'en-tête, feuille) — ces trois fonctions d'origine restent telles
+quelles, inchangées, au cas où il faille revenir dessus.
+
+US-06 (voir detection_format_causes.md) : `detecte_format` garde son
+vocabulaire interne ('canonique'/'regal'/'grada'/'a_formater'/None, utile
+pour savoir QUEL traitement appeler) ; `detecte_statut` l'enveloppe dans le
+vocabulaire externe demandé par le backlog (deja_au_format/formatable/
+non_formatable). `transforme_automatiquement` renvoie en plus une liste de
+causes structurées ({code, message, onglet, colonne, cellule}, voir
+causes_format.CauseFormatInvalide) au lieu de laisser une exception de
+format planter l'appelant.
 """
 
 import io
@@ -24,6 +34,8 @@ import openpyxl
 
 import pretraitement as pt
 import pretraitement_grada as pg
+import pretraitement_a_formater as paf
+from causes_format import CauseFormatInvalide
 
 _SIGNATURE_OLE2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
@@ -61,8 +73,9 @@ def convertit_xls_en_xlsx(chemin_source):
         )
         chemin_xlsx = os.path.join(dossier_tmp, "source.xlsx")
         if resultat.returncode != 0 or not os.path.exists(chemin_xlsx):
-            raise ValueError(
-                f"Échec de la conversion .xls -> .xlsx via LibreOffice : {resultat.stderr.strip()}"
+            raise CauseFormatInvalide(
+                "FORMAT_NON_SUPPORTE",
+                f"Échec de la conversion .xls -> .xlsx via LibreOffice : {resultat.stderr.strip()}",
             )
         with open(chemin_xlsx, "rb") as f:
             return io.BytesIO(f.read())
@@ -95,8 +108,14 @@ def _feuille_grada(ws):
         return False
 
 
-def detecte_format(chemin_source):
-    """Renvoie 'canonique', 'regal', 'grada' ou None (format non reconnu)."""
+def detecte_format(chemin_source, nom_fichier=None):
+    """Renvoie 'canonique', 'regal', 'grada', 'a_formater' ou None (format non reconnu).
+
+    `nom_fichier` sert UNIQUEMENT à reconnaître une des 5 familles de a_formater/ (BPU DQE,
+    Passion Froid, Episaveurs, BPUR FRESCA, MP ARDECHE 24) : contrairement à REGAL/GRADA/
+    canonique, détectés par le contenu (texte d'en-tête), ces familles sont reconnues par nom
+    de fichier exact (voir pretraitement_a_formater.trouve_entree_connue et son commentaire :
+    3 des 5 n'ont aucune validation de colonnes par texte, lire par position fixe)."""
     wb = openpyxl.load_workbook(chemin_source, data_only=True)
     for ws in wb.worksheets:
         if _ligne_entete_canonique(ws):
@@ -107,7 +126,32 @@ def detecte_format(chemin_source):
     for ws in wb.worksheets:
         if _feuille_grada(ws):
             return "grada"
+    if nom_fichier and paf.trouve_entree_connue(nom_fichier):
+        return "a_formater"
     return None
+
+
+# Vocabulaire externe demandé par US-06, critère 1 (deja_au_format/formatable/non_formatable)
+# — construit au-dessus de detecte_format, qui garde son vocabulaire interne plus détaillé
+# (nécessaire pour savoir QUEL traitement appeler). 'regal'/'grada'/'a_formater' sont bien les
+# trois valeurs regroupées sous 'formatable' que le backlog demande comme statut unique, pas
+# trois statuts distincts exposés tels quels à l'extérieur.
+_STATUT_EXTERNE = {
+    "canonique": "deja_au_format",
+    "regal": "formatable",
+    "grada": "formatable",
+    "a_formater": "formatable",
+    None: "non_formatable",
+}
+
+
+def detecte_statut(chemin_source, nom_fichier=None):
+    """Vocabulaire US-06 (deja_au_format/formatable/non_formatable). Attention : ne fait que la
+    détection rapide (comme detecte_format) — un fichier dit 'formatable' ici peut encore
+    échouer plus loin pendant la transformation réelle (ex: en-tête partiellement modifié,
+    repéré seulement à ce moment-là) ; voir transforme_automatiquement pour les causes dans ce
+    cas, qui bascule alors le résultat final en non_formatable."""
+    return _STATUT_EXTERNE[detecte_format(chemin_source, nom_fichier=nom_fichier)]
 
 
 def _choisit_feuille_grada(wb):
@@ -116,7 +160,9 @@ def _choisit_feuille_grada(wb):
     que les onglets sont dans l'ordre chronologique, comme observé dans VDR."""
     candidates = [ws for ws in wb.worksheets if _feuille_grada(ws)]
     if not candidates:
-        raise ValueError("Aucune feuille au format GRADA (tag _REFERENCE introuvable).")
+        raise CauseFormatInvalide(
+            "ONGLET_MANQUANT", "Aucune feuille au format GRADA (tag _REFERENCE introuvable)."
+        )
     return candidates[-1]
 
 
@@ -208,14 +254,21 @@ def _reseek(chemin):
 
 def transforme_automatiquement(chemin_source, chemin_sortie, nom_fichier=None):
     """Point d'entrée unique : détecte le format et transforme en
-    conséquence. Renvoie (format_detecte, nb_lignes) — nb_lignes est None
-    quand le fichier était déjà au format canonique (rien à transformer : le
-    fichier déposé peut être utilisé tel quel pour l'audit) ou quand le
+    conséquence. Renvoie (format_detecte, nb_lignes, causes) — nb_lignes est
+    None quand le fichier était déjà au format canonique (rien à transformer :
+    le fichier déposé peut être utilisé tel quel pour l'audit) ou quand le
     format n'a pas été reconnu (rien n'a été écrit dans chemin_sortie).
+    `causes` (US-06.2/.3) est une liste de dicts {code, message, onglet,
+    colonne, cellule} — non vide seulement quand format_detecte et nb_lignes
+    valent tous les deux None (non_formatable) : soit le format n'a été
+    reconnu par aucune des 4 familles, soit il a été reconnu mais la
+    transformation a quand même échoué sur une cause structurée (en-tête
+    partiellement modifié, colonne manquante...) au lieu de planter.
 
     chemin_source accepte aussi bien un chemin sur disque qu'un fichier en
     mémoire (BytesIO) ; dans ce dernier cas, nom_fichier sert à nommer le
-    fournisseur (impossible à déduire d'un BytesIO).
+    fournisseur (impossible à déduire d'un BytesIO) ET, pour les familles de
+    a_formater/, à les reconnaître par nom de fichier (voir detecte_format).
 
     Si le fichier déposé est un ancien .xls, il est d'abord converti en
     .xlsx (LibreOffice headless) avant toute détection de format — dans ce
@@ -223,6 +276,9 @@ def transforme_automatiquement(chemin_source, chemin_sortie, nom_fichier=None):
     reçoit quand même le .xlsx converti (nb_lignes vaut alors 0, pas None,
     pour signaler à l'appelant qu'il doit relire depuis chemin_sortie)."""
     _reseek(chemin_source)
+    nom_fichier_registre = nom_fichier or (
+        os.path.basename(chemin_source) if isinstance(chemin_source, str) else None
+    )
     nom_fournisseur = nom_fichier or (
         os.path.splitext(os.path.basename(chemin_source))[0]
         if isinstance(chemin_source, str) else "Fournisseur"
@@ -230,9 +286,12 @@ def transforme_automatiquement(chemin_source, chemin_sortie, nom_fichier=None):
 
     foi_convertido_de_xls = _est_ancien_xls(chemin_source)
     if foi_convertido_de_xls:
-        chemin_source = convertit_xls_en_xlsx(chemin_source)
+        try:
+            chemin_source = convertit_xls_en_xlsx(chemin_source)
+        except CauseFormatInvalide as exc:
+            return None, None, [exc.cause()]
 
-    format_detecte = detecte_format(chemin_source)
+    format_detecte = detecte_format(chemin_source, nom_fichier=nom_fichier_registre)
 
     if format_detecte == "canonique":
         if foi_convertido_de_xls:
@@ -243,12 +302,33 @@ def transforme_automatiquement(chemin_source, chemin_sortie, nom_fichier=None):
             else:
                 with open(chemin_sortie, "wb") as f:
                     f.write(conteudo)
-            return "canonique", 0
-        return "canonique", None
+            return "canonique", 0, []
+        return "canonique", None, []
     if format_detecte == "regal":
         _reseek(chemin_source)
-        return "regal", pt.transforme_catalogue_regal(chemin_source, chemin_sortie)
+        try:
+            return "regal", pt.transforme_catalogue_regal(chemin_source, chemin_sortie), []
+        except CauseFormatInvalide as exc:
+            return None, None, [exc.cause()]
     if format_detecte == "grada":
         _reseek(chemin_source)
-        return "grada", transforme_fichier_grada_auto(chemin_source, chemin_sortie, nom_fournisseur)
-    return None, None
+        try:
+            return ("grada",
+                    transforme_fichier_grada_auto(chemin_source, chemin_sortie, nom_fournisseur), [])
+        except CauseFormatInvalide as exc:
+            return None, None, [exc.cause()]
+    if format_detecte == "a_formater":
+        _reseek(chemin_source)
+        cle_registre = paf.trouve_entree_connue(nom_fichier_registre)
+        try:
+            return "a_formater", paf.transforme_fichier_connu(chemin_source, chemin_sortie, cle_registre), []
+        except CauseFormatInvalide as exc:
+            return None, None, [exc.cause()]
+    return None, None, [{
+        "code": "FORMAT_NON_SUPPORTE",
+        "message": (
+            "Format non reconnu : ni canonique, ni REGAL, ni famille GRADA, ni une famille "
+            "connue de a_formater/."
+        ),
+        "onglet": None, "colonne": None, "cellule": None,
+    }]

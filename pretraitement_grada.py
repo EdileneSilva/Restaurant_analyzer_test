@@ -16,6 +16,7 @@ import openpyxl
 from openpyxl.comments import Comment
 
 import pretraitement as pt
+from causes_format import CauseFormatInvalide
 
 COULEUR_A_VERIFIER = pt.COULEUR_ORIGINE_INCERTAINE
 
@@ -100,11 +101,16 @@ def _bio_et_label(signe):
 
 
 def _trouve_ligne_tags(ws, tag_recherche="_REFERENCE", max_lignes=40):
-    for r in range(1, min(max_lignes, ws.max_row) + 1):
+    derniere_ligne_cherchee = min(max_lignes, ws.max_row)
+    for r in range(1, derniere_ligne_cherchee + 1):
         for c in range(1, ws.max_column + 1):
             if str(ws.cell(row=r, column=c).value or "").strip() == tag_recherche:
                 return r
-    raise ValueError(f"Ligne de tags introuvable dans « {ws.title} » (cherché {tag_recherche!r})")
+    raise CauseFormatInvalide(
+        "SECTION_INTROUVABLE",
+        f"Ligne de tags introuvable dans « {ws.title} » (cherché {tag_recherche!r})",
+        onglet=ws.title, cellule=f"lignes 1 à {derniere_ligne_cherchee}",
+    )
 
 
 def _tags_de_la_ligne(ws, ligne_tags):

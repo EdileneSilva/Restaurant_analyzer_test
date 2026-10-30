@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 /transformed_files
 /commented_files
+*.docx
+*.pdf
+suivi_user_stories_01_06.md

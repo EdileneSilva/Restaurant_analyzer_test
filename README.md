@@ -32,8 +32,24 @@ fournisseurs qui ne sont pas déjà dans ce format.
 - `pretraitement_grada.py` — transforme les catalogues de la famille GRADA (AGRICOURT, VDR,
   Boucherie) vers le format canonique.
 - `pretraitement_auto.py` — point d'entrée unique utilisé par `app.py` : détecte
-  automatiquement le format d'un fichier déposé (canonique / REGAL / GRADA / `.xls`
-  ancien à convertir / non reconnu) et applique le bon traitement.
+  automatiquement le format d'un fichier déposé (canonique / REGAL / GRADA / une des 5
+  familles de `a_formater/` / `.xls` ancien à convertir / non reconnu) et applique le bon
+  traitement. `detecte_statut()` expose le vocabulaire US-06 (`deja_au_format`/`formatable`/
+  `non_formatable`) ; `transforme_automatiquement()` renvoie en plus une liste de causes
+  structurées (`{code, message, onglet, colonne, cellule}`) quand le résultat est
+  `non_formatable` — voir US-06 dans `suivi_user_stories_01_06.md` et
+  `detection_format_causes.md`.
+- `pretraitement_a_formater.py` — transforme les fichiers bruts de `a_formater/` qui ne sont
+  pas déjà pris en charge par les deux scripts ci-dessus (familles BPU DQE, Passion Froid,
+  Episaveurs, BPUR FRESCA, MP ARDECHE 24). Utilisable en CLI (`python
+  pretraitement_a_formater.py`, écrit dans `a_formater_transforme/` — jamais directement dans
+  `pret_pour_audit/`, pour ne pas fausser l'indice de prix partagé utilisé par
+  `audit_general.construit_indice_prix()`) ou via `pretraitement_auto.py` (fichier par
+  fichier, reconnu par nom de fichier exact — voir `trouve_entree_connue`).
+- `causes_format.py` — `CauseFormatInvalide`, l'exception structurée (code + emplacement)
+  utilisée par `pretraitement.py`, `pretraitement_grada.py`, `pretraitement_a_formater.py` et
+  `pretraitement_auto.py` pour signaler un format invalide sans juste planter l'appelant
+  (US-06.2/.3). Fichier séparé pour éviter un import circulaire entre ces scripts.
 - `first_scripts/first_attempt_v2_prototype.py` — règles de cohérence déjà validées,
   réutilisées telles quelles par `audit_general.py` (import direct, ne pas supprimer).
 
@@ -43,8 +59,16 @@ fournisseurs qui ne sont pas déjà dans ce format.
   C'est ici qu'arrivent les nouveaux fichiers, le temps de vérifier leur format. Ceux déjà
   au format canonique sont ensuite déplacés tels quels vers `pret_pour_audit/`.
 - `a_formater/` — fichiers confirmés comme n'étant pas encore pris en charge
-  automatiquement (nécessitent un nouveau script de transformation). Une fois le script
-  écrit (ou via `pretraitement_auto.py`), le résultat transformé va dans
+  automatiquement (nécessitent un nouveau script de transformation, ou une confirmation
+  métier sur le mapping des colonnes avant de l'écrire — voir
+  `mapping_colonnes_a_formater.xlsx`). Un script existe pour les 21 fichiers reçus à ce jour
+  (`pretraitement_a_formater.py`), y compris les 12 fichiers "MP ARDECHE 24" (4 premiers
+  mappés le 2026-10-29, 8 de plus le 2026-10-30 — même en-tête partagé, donc pas de nouvelle
+  décision de mapping colonne par colonne, juste un vocabulaire Origine/Signes étendu à de
+  nouveaux départements français et de nouveaux sigles de label — voir
+  `mapping_colonnes_a_formater.xlsx`).
+- `a_formater_transforme/` — sortie CLI de `pretraitement_a_formater.py`. Volontairement
+  séparé de `pret_pour_audit/` : à relire fichier par fichier avant de déplacer à la main vers
   `pret_pour_audit/`.
 - `pret_pour_audit/` — dossier d'entrée du mode CLI de `audit_general.py`
   (`DOSSIER_ENTREE`) : uniquement des fichiers déjà au format canonique, prêts à être
@@ -73,9 +97,12 @@ Le détail fichier par fichier (source, date de réception, statut, anonymisatio
 - [`analyse_exploratoire.md`](analyse_exploratoire.md) — analyse ponctuelle (TT-03) de
   l'échantillon de fichiers reçus avant la mise en place du format canonique ; photo d'un
   instant donné, pas mise à jour au fil de l'eau.
-- [`suivi_user_stories_01_05.md`](suivi_user_stories_01_05.md) — état d'avancement détaillé des
-  US-01 à US-05 (critères d'acceptation un par un : fait / partiel / pas encore fait), avec
+- [`suivi_user_stories_01_06.md`](suivi_user_stories_01_06.md) — état d'avancement détaillé des
+  US-01 à US-06 (critères d'acceptation un par un : fait / partiel / pas encore fait), avec
   renvoi vers le document ou la ligne de code concerné pour chacun.
+- [`detection_format_causes.md`](detection_format_causes.md) — préparation d'US-06 : vocabulaire
+  de statut (`deja_au_format`/`formatable`/`non_formatable`) et catalogue de causes proposés,
+  à partir des échecs déjà codés dans les scripts de prétraitement. Spec, rien d'implémenté.
 
 ## Lancer l'app
 

@@ -16,6 +16,8 @@ from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from causes_format import CauseFormatInvalide
+
 COULEUR_ORIGINE_INCERTAINE = PatternFill(
     start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"
 )
@@ -430,9 +432,17 @@ def transforme_catalogue_regal(chemin_source, chemin_sortie):
         "tva": "Code TVA",
         "poids_piece": "Poids pièce",
     })
-    for cle, colonne in colonnes.items():
-        if colonne is None:
-            raise ValueError(f"Colonne source introuvable pour « {cle} » dans {chemin_source}")
+    # Collecte TOUTES les colonnes manquantes avant de lever la cause (pas seulement la
+    # première) : US-06.2 demande que chaque cause soit listée — ici une seule cause
+    # structurée, mais dont colonne/message nomment chaque colonne manquante, plutôt que de
+    # s'arrêter à la première et masquer les autres qui seraient trouvées au prochain essai.
+    manquantes = [cle for cle, colonne in colonnes.items() if colonne is None]
+    if manquantes:
+        raise CauseFormatInvalide(
+            "COLONNE_OBLIGATOIRE_ABSENTE",
+            f"Colonne(s) source introuvable(s) pour {manquantes} dans {chemin_source}",
+            onglet=ws_source.title, colonne=", ".join(manquantes), cellule="ligne 1",
+        )
 
     colonnes_allergenes = _trouve_colonnes(ws_source, {nom: nom for nom in ALLERGENES})
 

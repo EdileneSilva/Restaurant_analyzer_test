@@ -56,7 +56,7 @@ def calcule_resultats(fichiers_deposes):
 
         try:
             tampon_sortie = io.BytesIO()
-            formato, nb_lignes = pretraitement_auto.transforme_automatiquement(
+            formato, nb_lignes, causas = pretraitement_auto.transforme_automatiquement(
                 io.BytesIO(contenu), tampon_sortie, nom_fichier=nom_base
             )
         except Exception as exc:
@@ -64,10 +64,18 @@ def calcule_resultats(fichiers_deposes):
             continue
 
         if formato is None:
-            erreurs.append(
-                f"**{fichier.name}** : format non reconnu (ni REGAL, ni famille GRADA, ni déjà "
-                "au format attendu) — ignoré."
-            )
+            if causas:
+                detail = " ; ".join(
+                    f"[{c['code']}]" + (f" (onglet « {c['onglet']} »)" if c.get("onglet") else "")
+                    + f" {c['message']}"
+                    for c in causas
+                )
+                erreurs.append(f"**{fichier.name}** : format non formatable — {detail}")
+            else:
+                erreurs.append(
+                    f"**{fichier.name}** : format non reconnu (ni REGAL, ni famille GRADA, ni "
+                    "une famille connue de a_formater/, ni déjà au format attendu) — ignoré."
+                )
             continue
 
         if nb_lignes is not None:
