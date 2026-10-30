@@ -982,6 +982,18 @@ FICHIERS_ARDECHE = {
 # ci-dessus ("plutôt que de tout déduire dynamiquement avec le risque de se tromper en
 # silence") — limite connue : un fichier JAMAIS VU, même strictement au même format, n'est pas
 # reconnu tant qu'il n'est pas ajouté à un registre.
+def _sans_extension_xlsx(nom):
+    """Retire UNIQUEMENT une vraie extension .xlsx/.xls terminale, par opposition à
+    os.path.splitext qui coupe au DERNIER point du nom quel qu'il soit — ce qui casse un nom
+    déjà sans extension mais contenant un point ailleurs (ex: "1. BPUR FRESCA LOT 1 SURGELES
+    CONV SIQO", le "1." étant un numéro de lot, pas une extension : os.path.splitext le
+    tronquait à tort en juste "1", faisant échouer la reconnaissance de ce fichier précis -
+    bug trouvé le 2026-10-30 lors d'un test manuel)."""
+    if nom.lower().endswith((".xlsx", ".xls")):
+        return os.path.splitext(nom)[0]
+    return nom
+
+
 def trouve_entree_connue(nom_fichier_ou_chemin):
     """Retrouve la clé exacte d'un des 5 registres (FICHIERS_BPU_DQE, FICHIER_PASSION_FROID,
     FICHIER_EPISAVEURS_XLS, FICHIER_BPUR_FRESCA, FICHIERS_ARDECHE) à partir d'un chemin ou d'un
@@ -990,13 +1002,13 @@ def trouve_entree_connue(nom_fichier_ou_chemin):
     nom_fournisseur dans transforme_automatiquement), donc la comparer telle quelle à une clé
     de registre qui la garde ("....xlsx") ne matcherait jamais. Renvoie la clé si reconnue,
     sinon None."""
-    stem = pt._normalise(os.path.splitext(os.path.basename(str(nom_fichier_ou_chemin)))[0])
+    stem = pt._normalise(_sans_extension_xlsx(os.path.basename(str(nom_fichier_ou_chemin))))
     toutes_cles = (
         list(FICHIERS_BPU_DQE) + [FICHIER_PASSION_FROID, FICHIER_EPISAVEURS_XLS, FICHIER_BPUR_FRESCA]
         + list(FICHIERS_ARDECHE)
     )
     for cle in toutes_cles:
-        if pt._normalise(os.path.splitext(cle)[0]) == stem:
+        if pt._normalise(_sans_extension_xlsx(cle)) == stem:
             return cle
     return None
 
