@@ -291,6 +291,14 @@ ci-dessous, candidate à la suppression) :
 - Un bloc Fournisseur N entièrement vide n'est jamais signalé (il n'a simplement pas
   participé à cette ligne — le bloc Fournisseur 2/3 n'existe que pour comparaison avec le 1).
 
+**Mise à jour (2026-11-09)** : `audit_general_commentaires.py` avait une exception volontaire
+qui n'existe plus — Unité de référence et Unité de commande vides n'y étaient jamais signalées
+comme "champ obligatoire vide" (contrairement à `audit_general.py`), au motif que choisir la
+bonne unité serait la responsabilité de l'équipe d'audit, pas de la personne qui remplit le
+fichier. Retiré à la demande de l'utilisateur : la règle doit être identique dans les deux
+moteurs, peu importe la raison pour laquelle une colonne est vide — voir les totaux mis à jour
+dans « Jeu de référence » plus bas.
+
 ### 28. Même Désignation de l'article, mais Lot différent
 
 Deux lots distincts ne devraient pas décrire le même produit avec un texte de désignation
@@ -501,30 +509,86 @@ silencieusement les constantes posées par le premier — sans aucune erreur, au
   isoler chaque appel dans son propre processus (`subprocess`, ou deux process `multiprocessing`
   séparés) plutôt que de les importer tous les deux dans le même interpréteur.
 
+### 42. Même unité des deux côtés → mêmes prix, sans exception (`verifie_coherence_unite_prix_identiques`)
+
+Nouvelle règle inconditionnelle (les deux moteurs) : quand l'Unité de référence et l'Unité de
+commande finales sont le même texte, les deux prix (référence et commande) DOIVENT être
+égaux — signalé systématiquement, même quand le Conditionnement semble expliquer
+mathématiquement l'écart (contrairement au reste du moteur, qui acceptait ce cas en silence).
+Garde-fou contre le doublon : si `resultat.couleur_m` est déjà posé (le moteur partagé a déjà
+détecté ce même cas via son propre canal "même unité, ratio ≠ 1, rien ne l'explique"), la
+nouvelle règle ne rajoute rien, pour ne pas signaler deux fois la même cellule (trouvé via
+`test_sans_doublon_de_commentaire`). N'affecte que "MDC_IMPORT_MARCHE" parmi les 7 fichiers de
+référence — exemple réel : ligne 163 "pâté de foie supérieur", KG des deux côtés, 0,6667€
+contre 0,95€.
+
+### 43. Conditionnement réduit à un nombre nu, sans unité ni récipient (`reconsidere_nombre_sans_unite`)
+
+Un Conditionnement recopié tel quel depuis la source quand aucun code/mot n'a permis de
+l'interpréter (ex: "6,000", vu sur `pretraitement_a_formater.transforme_ardeche` quand le code
+source "UC" n'est ni KG/L/UN ni un mot de contenant reconnu dans la désignation) passait
+inaperçu : aucune règle ne signalait ce nombre, alors qu'un nombre différent de 1 peut être un
+multiplicateur de prix jamais vérifié. Nouvelle règle, les deux moteurs : un nombre nu ≠ 1 dans
+le Conditionnement est désormais signalé explicitement sur sa propre cellule ("ce nombre peut
+être un multiplicateur du prix qui n'a pas été pris en compte"). Un nombre = 1 reste muet (rien
+à multiplier). Exemple réel : DADS MP ARDECHE 24 Lot 06, "Lait 1/2 écrémé UHT BIO", UC="BT"
+(aucun mot de contenant dans la désignation), Conditionnement="6,000".
+
+### 44. Faux signalement de prix sur un contenant pluriel d'unités déjà vendues à l'unité
+
+Quand le Conditionnement nomme un récipient trouvé dans la désignation ET que l'Unité de
+commande dit déjà qu'on vend à l'unité individuelle ("UNITÉ", "PIECE", "PC"), le nombre lu
+devant ce récipient (ex: "48" dans "48 POTS DE 125G") n'est qu'un compte de récipients dans un
+emballage plus grand, PAS un multiplicateur du prix de commande (déjà au récipient). Avant
+cette règle, `determine_base_et_quantite` traitait ce nombre comme un total à diviser
+(48 × 125 g = 6 kg), suggérant à tort un prix de référence 48 fois trop petit. Corrigé en
+retrouvant le nombre N séparément (même regex que celle qui l'a reconnu) et en divisant la
+quantité par N avant le calcul du ratio, uniquement quand l'Unité de commande indique déjà une
+vente à l'unité. La suggestion "l'unité de commande semble plutôt être '<récipient>'" (utile,
+correcte) n'est pas affectée, seule la suggestion de prix erronée disparaît. Exemple réel :
+DADS MP ARDECHE 24 Lot 06, "Yaourt 1/2 écrémé nature pot carton (x48) 125 g", Unité de
+commande="UNITÉ", Conditionnement="48 POTS DE 125G", Prix de référence=3,04€/kg (correct) —
+suggérait à tort 0,0633€/kg avant correction.
+
+### 45. Récipient d'une seule unité de référence : aucune correction proposée, dans aucun sens
+
+Quand l'Unité de référence et l'Unité de commande sont déjà identiques, que le Prix de
+référence est déjà égal au Prix de commande (rien à recalculer), et que le Conditionnement ne
+décrit qu'UNE seule unité de référence (ex: "BRIQUE DE 1 L" ou "SACHET DE 1 KG", quantité = 1),
+plus aucune suggestion de changer l'Unité de commande n'est faite — ni vers le mot du récipient
+(le nommer n'apporte aucune information de plus que l'unité de mesure déjà écrite), ni dans
+l'autre sens. Règle symétrique demandée explicitement par l'utilisateur ("vale pra os dois
+lados"), confirmée après lui avoir montré, comme contre-exemple, le cas réel "SACHET DE 1 KG"
+(`2026 09 22 Base article groupement 1.xlsx`, lignes 183-191, ex: STEAK HACHE DE BOEUF) —
+structurellement identique au cas "BRIQUE DE 1 L" qu'elle avait signalé (DADS MP ARDECHE 24
+Lot 06) : la même règle s'applique aux deux, pas de garder un cas en exception. Pour une
+quantité ≠ 1 (ex: "SEAU DE 10 L"), la suggestion continue d'apparaître normalement — voir les
+totaux de non-régression mis à jour ci-dessous.
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
-groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables, mesurés au
-2026-10-26 (après toutes les règles ci-dessus, y compris n°33-39) :
+groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
+actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
+2026-11-09)** — ce sont exactement celles vérifiées par `test_non_regression_audit_general.py`
+(`TOTAUX`) aujourd'hui ; l'historique des changements successifs (règle par règle, avec la
+raison et l'exemple réel qui l'a motivée) est détaillé dans les paragraphes "Mise à jour"
+ci-dessous, du plus ancien au plus récent :
 
 | Fichier | Lignes avec incohérence | Cellules marquées |
 |---|---|---|
-| Base article groupement 1 | 183 | 809 |
-| Base article groupement 2 | 303 | 888 |
-| Base article groupement 3 | 234 | 1034 |
-| Base article groupement 4 | 198 | 1010 |
-| Base article groupement 5 | 219 | 896 |
-| Base article groupement commun | 760 | 1310 |
-| MDC_IMPORT_MARCHE | 198 | 740 |
+| Base article groupement 1 | 173 | 799 |
+| Base article groupement 2 | 293 | 878 |
+| Base article groupement 3 | 224 | 1024 |
+| Base article groupement 4 | 191 | 1003 |
+| Base article groupement 5 | 219 | 889 |
+| Base article groupement commun | 748 | 1298 |
+| MDC_IMPORT_MARCHE | 193 | 721 |
 
 Ces chiffres (`audit_general.py`, sortie dans `transformed_files/`) servent de résultat attendu
 pour TT-09 (tests de non-régression) : si une future modification du code change ces totaux
 sans raison identifiée, c'est un signal de régression à investiguer — voir
-`test_non_regression.py`, qui vérifie ces totaux automatiquement. Les écarts avec les chiffres
-précédents (mesurés au 2026-10-22) reflètent l'accumulation des règles n°33-38 ci-dessus
-(notamment n°33, le remplacement automatique des mots non reconnus par la base, qui ajoute un
-changement — donc une cellule marquée en plus — sur chaque ligne concernée), pas une
-régression.
+`test_non_regression_audit_general.py`, qui vérifie ces totaux automatiquement.
 
 > **Mise à jour (2026-10-30)** : "Base article groupement commun" baisse de 772→760 lignes et
 > 1348→1310 cellules suite à l'élargissement de `PAYS_ORIGINE_CONNUS` (synchronisé avec
@@ -537,7 +601,10 @@ régression.
 
 > `audit_general_commentaires.py` (sortie dans `commented_files/`) a ses propres totaux,
 > structurellement différents puisque cette version ne prend presque jamais de décision de
-> contenu (voir son docstring) : au 2026-10-26, 664 / 737 / 855 / 811 / 754 / 965 / 738
+> contenu (voir son docstring). **Valeurs actuelles (2026-11-09)**, vérifiées par
+> `test_non_regression_audit_commentaires.py` (`TOTAUX_CELLULES`) : 756 / 827 / 987 / 955 /
+> 864 / 955 / 744 cellules marquées, dans le même ordre de fichiers que ci-dessus. Historique :
+> au 2026-10-26, 664 / 737 / 855 / 811 / 754 / 965 / 738
 > cellules marquées, dans le même ordre de fichiers que ci-dessus (total 5271 sur les 7
 > fichiers). Zéro doublon de commentaire et zéro changement sans effet réel (no-op) vérifiés
 > par balayage automatique sur les 7 fichiers à cette date. **Mise à jour (2026-10-30)** :
