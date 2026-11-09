@@ -89,7 +89,19 @@ def _ligne_entete_canonique(ws):
     for r in range(1, min(5, ws.max_row) + 1):
         textes = [pt._normalise(ws.cell(row=r, column=c).value) for c in range(1, ws.max_column + 1)]
         a_designation = any("designation de l'article" in t for t in textes)
-        a_unite_ref = any("unite de reference" in t for t in textes)
+        # Même piège que localise_feuille_et_colonnes (audit_general.py), trouvé le 2026-11-09
+        # en vérifiant les 6 fichiers "Base IANOR AGAPE 16" de a_inspecter/ : leur en-tête
+        # "Poids de la PC (si Unité de référence = PC)" contient la phrase "unité de
+        # référence" entre parenthèses — une recherche en simple substring matchait À TORT
+        # cette colonne Poids (jamais la vraie colonne 4, dont l'en-tête, mal orthographié
+        # "Unité Référence" sans "de", ne matchait justement PAS la recherche d'origine). Le
+        # résultat final ("canonique") restait bon par coïncidence — ce n'était donc pas
+        # observable sur ces 6 fichiers précis — mais la détection elle-même était fragile :
+        # corrigé en excluant les cellules commençant par "poids", comme côté audit_general.
+        a_unite_ref = any(
+            t.startswith("unite") and "reference" in t
+            for t in textes if not t.startswith("poids")
+        )
         if a_designation and a_unite_ref:
             return r
     return None

@@ -543,6 +543,18 @@ régression.
 > par balayage automatique sur les 7 fichiers à cette date. **Mise à jour (2026-10-30)** :
 > "Base article groupement commun" passe de 965 à 927 cellules marquées, même cause que
 > ci-dessus (liste de pays élargie, identique dans les deux moteurs).
+>
+> **Mise à jour (2026-11-09)** : `signale_champs_obligatoires_optionnels` (dans
+> `audit_general_commentaires.py`) avait une exception volontaire, documentée dans son propre
+> code mais jamais dans ce fichier : Unité de référence et Unité de commande vides n'étaient
+> JAMAIS signalées comme "champ obligatoire vide" dans ce moteur (contrairement à
+> `audit_general.py`), au motif que "laisser l'unité correcte est notre responsabilité
+> (l'équipe d'audit), pas celle de la personne qui remplit le fichier". Retiré à la demande de
+> l'utilisateur, qui a établi une règle contraire : la règle obligatoire/optionnel doit être
+> identique partout, peu importe la raison pour laquelle une colonne est vide. Conséquence
+> attendue : tous les totaux de cellules montent, puisque bien plus de lignes ont ces deux
+> champs vides par construction (ex: BPUR FRESCA, qui n'a jamais d'Unité de commande). Nouveaux
+> totaux, même ordre de fichiers : 766 / 837 / 997 / 962 / 871 / 967 / 743.
 
 > Historique : les totaux de cellules marquées de groupement 1 et 2 sont passés de 247→255
 > et 419→427 le 2026-10-15, suite à l'ajout de la règle n°10 ci-dessus (contenant à double

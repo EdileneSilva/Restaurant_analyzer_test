@@ -2270,6 +2270,25 @@ def majuscule_si_inchangee(valeur):
     return maj if maj != valeur else None
 
 
+def normalise_ecriture_unite_ref(valeur):
+    """Même rôle que majuscule_si_inchangee, mais pour l'Unité de référence (D) spécifiquement :
+    en plus de forcer la casse, convertit la pure synonymie 'pièce'/'piece' -> 'PC' — seule
+    valeur acceptée par format_cible.md pour une unité comptée à la pièce (jamais juste le mot
+    'PIÈCE', qui n'est pas un code reconnu par la base d'intégration). Trouvé le 2026-11-09 :
+    cette conversion était déjà documentée comme voulue (voir audit_general_commentaires.py)
+    mais ne se déclenchait qu'en sous-produit du recalcul de prix — jamais pour les lignes où
+    ce recalcul n'a pas lieu (ex: BPUR FRESCA, qui n'a jamais de prix de commande), laissant
+    'PIÈCE' tel quel indéfiniment. JAMAIS marqué (pas de couleur ni de commentaire), puisque ce
+    n'est qu'une question d'écriture, pas une décision de fond. Renvoie None si rien à
+    changer."""
+    if not isinstance(valeur, str):
+        return None
+    if motor.normalise_texte(valeur) in ("pc", "piece", "pièce"):
+        return "PC" if valeur != "PC" else None
+    maj = valeur.upper()
+    return maj if maj != valeur else None
+
+
 def marque(cel, couleur, fournisseur_nom, texte):
     cel.fill = PatternFill(start_color=couleur, end_color=couleur, fill_type="solid")
     prefixe = f"[{fournisseur_nom}] " if fournisseur_nom else ""
@@ -2527,7 +2546,7 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
             valeur_d = resultat.nouveau_d.upper() if isinstance(resultat.nouveau_d, str) else resultat.nouveau_d
             ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]).value = valeur_d
         else:
-            maj = majuscule_si_inchangee(unite_ref)
+            maj = normalise_ecriture_unite_ref(unite_ref)
             if maj:
                 ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]).value = maj
         if resultat.nouveau_l is not None:
@@ -2626,7 +2645,7 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
     else:
         # Prix manquant(s) : aucune des règles ci-dessus n'a pu s'exécuter, mais la casse de
         # D/L doit quand même être forcée en MAJUSCULES (jamais marqué).
-        maj_d = majuscule_si_inchangee(unite_ref)
+        maj_d = normalise_ecriture_unite_ref(unite_ref)
         if maj_d:
             ws.cell(row=ligne, column=fournisseur["_col_unite_ref"]).value = maj_d
         maj_l = majuscule_si_inchangee(unite_cmd)
@@ -3073,6 +3092,92 @@ def normalise_lots(ws, ws_valeurs, ligne_debut, col_lot):
     return total
 
 
+RE_DOUBLON_LOT_NUMERO = re.compile(r"(\d+)")
+
+
+def _normalise_espace_casse(texte):
+    """Strip + collapse des espaces + minuscules — ne touche à AUCUN autre caractère (jamais à
+    un chiffre), pour ne jamais risquer de confondre deux valeurs réellement différentes (ex:
+    Lot 5 et Lot 6 restent toujours deux valeurs distinctes, jamais fusionnées)."""
+    return re.sub(r"\s+", " ", str(texte).strip()).casefold()
+
+
+def _separe_numero_description_lot(valeur):
+    """Repère le premier nombre dans une valeur de Lot et renvoie (numero_int, description),
+    `description` étant le texte après ce nombre (ponctuation/espace de liaison immédiats
+    retirés), normalisé espace/casse. Renvoie (None, None) si aucun nombre n'est trouvé — ces
+    valeurs ne participent pas à la comparaison inter-numéro de corrige_doublons_texte."""
+    m = RE_DOUBLON_LOT_NUMERO.search(str(valeur))
+    if not m:
+        return None, None
+    reste = re.sub(r"^[\s:.\-–]+", "", str(valeur)[m.end():])
+    return int(m.group(1)), (_normalise_espace_casse(reste) or None)
+
+
+def corrige_doublons_texte(ws, ligne_debut, colonne, verifie_numero_lot=False):
+    """Repère, dans une colonne de texte libre (Lot ou nom de Fournisseur) — lue sur `ws`,
+    donc après tout remplissage/normalisation déjà appliqué (Marché/Lot recopiés, numéro de
+    lot zéro-préfixé) —, des valeurs qui devraient être identiques mais ne le sont pas
+    exactement : espace en trop ou casse différente (ex: 'Lot 05 ' vs 'Lot 05', 'DOYEN' vs
+    'Doyen'). CORRIGÉES automatiquement : toutes les cellules d'un même groupe sont réécrites
+    vers la forme la plus fréquente du groupe (égalité départagée par la forme la plus courte,
+    puis par ordre alphabétique).
+
+    Si verifie_numero_lot=True (colonne Lot uniquement), repère EN PLUS des lignes avec un
+    numéro de lot DIFFÉRENT mais la même description après le numéro (espace/casse ignorés
+    aussi dans cette comparaison) — ex: 'LOT 05 : Saucisserie' et 'LOT 06 : saucisserie' :
+    signe probable qu'une ligne a glissé vers le mauvais numéro (ex: un tri/déplacement de
+    ligne dans Excel). Ce 2e cas n'est QUE signalé, jamais corrigé seul — impossible de deviner
+    lequel des deux numéros est le bon sans risquer de fusionner deux Lots réellement
+    différents. Renvoie (nb_corrections, avertissements) où avertissements est une liste de
+    messages texte, vide si rien à signaler."""
+    if not colonne:
+        return 0, []
+
+    valeurs_par_ligne = {}
+    for ligne in range(ligne_debut, ws.max_row + 1):
+        valeur = ws.cell(row=ligne, column=colonne).value
+        if valeur is None or str(valeur).strip() == "":
+            continue
+        valeurs_par_ligne[ligne] = str(valeur)
+
+    groupes = {}
+    for ligne, valeur in valeurs_par_ligne.items():
+        groupes.setdefault(_normalise_espace_casse(valeur), []).append((ligne, valeur))
+
+    nb_corrections = 0
+    for occurrences in groupes.values():
+        formes = {}
+        for _, valeur in occurrences:
+            formes[valeur] = formes.get(valeur, 0) + 1
+        if len(formes) <= 1:
+            continue  # déjà uniforme dans ce groupe
+        forme_canonique = max(formes.items(), key=lambda t: (t[1], -len(t[0]), t[0]))[0]
+        for ligne, valeur in occurrences:
+            if valeur != forme_canonique:
+                ws.cell(row=ligne, column=colonne).value = forme_canonique
+                valeurs_par_ligne[ligne] = forme_canonique
+                nb_corrections += 1
+
+    avertissements = []
+    if verifie_numero_lot:
+        par_description = {}
+        for valeur in valeurs_par_ligne.values():
+            numero, description = _separe_numero_description_lot(valeur)
+            if numero is None or not description:
+                continue
+            par_description.setdefault(description, set()).add(numero)
+        for description, numeros in sorted(par_description.items()):
+            if len(numeros) > 1:
+                avertissements.append(
+                    f"Lots {sorted(numeros)} partagent la même description "
+                    f"(« {description} ») — vérifier qu'aucune ligne n'a glissé vers le "
+                    "mauvais numéro de Lot."
+                )
+
+    return nb_corrections, avertissements
+
+
 TITRES_CATEGORIES_RAPPORT = {
     "doublons": "Lignes strictement dupliquées (ou candidates à la suppression)",
     "references_doublon": "Références en double (même référence + même prix)",
@@ -3168,7 +3273,8 @@ def calcule_valeurs_uniques(ws_valeurs, ligne_debut, colonne):
 
 
 def genere_rapport(ws, ws_valeurs, nom_feuille, ligne_debut, col_designation, col_unite_ref,
-                    col_poids_ref, fournisseurs, categories=None, col_lot=None):
+                    col_poids_ref, fournisseurs, categories=None, col_lot=None,
+                    doublons_corriges=0, doublons_a_verifier=None):
     if categories is None:
         categories = calcule_categories_rapport(ws, ws_valeurs, ligne_debut, col_designation,
                                                  col_unite_ref, col_poids_ref, fournisseurs)
@@ -3202,6 +3308,29 @@ def genere_rapport(ws, ws_valeurs, nom_feuille, ligne_debut, col_designation, co
         lignes_sortie.append("|---|---|---|")
         for valeur, longueur, occurrences in valeurs_lot:
             lignes_sortie.append(f"| `{valeur}` | {longueur} | {occurrences} |")
+    lignes_sortie.append("")
+
+    # Doublons Lot/Fournisseur dus à un espace en trop ou une casse différente : déjà corrigés
+    # automatiquement par corrige_doublons_texte avant d'arriver ici (voir traite_feuille) —
+    # ce qui suit n'est qu'un compte-rendu de ce qui a été fait, pas une nouvelle vérification.
+    doublons_a_verifier = doublons_a_verifier or []
+    lignes_sortie.append("## Doublons Lot/Fournisseur (espace ou casse)")
+    lignes_sortie.append("")
+    if doublons_corriges:
+        lignes_sortie.append(
+            f"**{doublons_corriges}** cellule(s) corrigée(s) automatiquement (espace en trop "
+            "ou casse différente, même valeur sinon)."
+        )
+    else:
+        lignes_sortie.append("Rien à corriger (aucun doublon d'espace/casse détecté).")
+    if doublons_a_verifier:
+        lignes_sortie.append("")
+        lignes_sortie.append(
+            "À vérifier manuellement (même description de Lot, numéro différent — "
+            "possible ligne glissée vers le mauvais numéro) :"
+        )
+        for message in doublons_a_verifier:
+            lignes_sortie.append(f"- {message}")
     lignes_sortie.append("")
 
     for cle, titre in TITRES_CATEGORIES_RAPPORT.items():
@@ -3311,6 +3440,7 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
     stats = {"lignes_avec_incoherence": 0, "marques": 0, "unite_ref_vide": 0,
               "lignes_dupliquees": 0, "copies_possibles": 0, "lots_normalises": 0,
               "marche_lot_rempli": 0, "marche_lot_signale": 0, "lignes_vides_a_supprimer": 0,
+              "doublons_texte_corriges": 0, "doublons_texte_a_verifier": [],
               "lignes_demasquees": desocculte_lignes_et_colonnes(ws)}
 
     # Calculé tôt (pas seulement en fin de fonction) pour que signale_designation_dupliquee()
@@ -3327,6 +3457,16 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
         ws, ws_valeurs, ligne_debut, col_designation, col_marche, col_lot)
 
     stats["lots_normalises"] = normalise_lots(ws, ws_valeurs, ligne_debut, col_lot)
+
+    # Lu sur `ws` (pas ws_valeurs) et appelé APRÈS comble_marche_lot/normalise_lots ci-dessus :
+    # ces deux fonctions viennent d'écrire dans la colonne Lot, donc corrige_doublons_texte doit
+    # voir leur résultat final pour corriger/comparer sur l'état le plus à jour, pas l'original.
+    nb_corr_lot, avertissements_doublons = corrige_doublons_texte(
+        ws, ligne_debut, col_lot, verifie_numero_lot=True)
+    nb_corr_fournisseurs = sum(
+        corrige_doublons_texte(ws, ligne_debut, f["cond"] - 1)[0] for f in fournisseurs)
+    stats["doublons_texte_corriges"] = nb_corr_lot + nb_corr_fournisseurs
+    stats["doublons_texte_a_verifier"] = avertissements_doublons
 
     for fournisseur in fournisseurs:
         stats["copies_possibles"] += signale_copies_possibles_fournisseur(
@@ -3453,7 +3593,7 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
         # Force la casse en MAJUSCULES dès maintenant (jamais marqué) : couvre aussi les
         # lignes où AUCUN fournisseur n'a de prix (donc audite_fournisseur() ne s'exécute
         # jamais assez pour s'en charger lui-même).
-        maj_d = majuscule_si_inchangee(unite_ref)
+        maj_d = normalise_ecriture_unite_ref(unite_ref)
         if maj_d:
             ws.cell(row=ligne, column=col_unite_ref).value = maj_d
 
@@ -3514,7 +3654,8 @@ def audite_classeur(wb_valeurs, wb, indice_prix=None):
         rapport = genere_rapport(ws, ws_valeurs, nom_feuille, info["ligne_debut_donnees"],
                                   info["col_designation"], info["col_unite_ref"],
                                   info["col_poids_ref"], info["fournisseurs"], categories,
-                                  info["col_lot"])
+                                  info["col_lot"], stats["doublons_texte_corriges"],
+                                  stats["doublons_texte_a_verifier"])
         resultats.append({
             "nom": nom_feuille,
             "fournisseurs": [f["nom"] for f in info["fournisseurs"]],

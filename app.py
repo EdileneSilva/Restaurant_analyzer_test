@@ -174,6 +174,25 @@ if donnees:
                         f"{stats['marche_lot_signale']}"
                     )
 
+                    # Doublons Lot/Fournisseur dus à un espace en trop ou une casse différente :
+                    # déjà corrigés automatiquement par corrige_doublons_texte (audit_general*.py)
+                    # avant d'arriver ici — affiché en légende, comme Marché/Lot ci-dessus. Le cas
+                    # "même description, numéro de Lot différent" n'est lui que signalé (jamais
+                    # corrigé seul), dans un repli déroulant séparé.
+                    avertissements_lot = stats["doublons_texte_a_verifier"]
+                    st.caption(
+                        f"Doublons Lot/Fournisseur (espace ou casse) corrigés automatiquement : "
+                        f"{stats['doublons_texte_corriges']}"
+                        + ("" if avertissements_lot else " · rien d'autre à vérifier.")
+                    )
+                    if avertissements_lot:
+                        with st.expander(
+                            f"⚠️ Lots à vérifier manuellement (même description, numéro "
+                            f"différent) ({len(avertissements_lot)})"
+                        ):
+                            for message in avertissements_lot:
+                                st.markdown(f"- {message}")
+
                     # Juste les titres + compteurs par défaut ; les détails (ligne par ligne,
                     # avec le commentaire) ne s'affichent que si on clique pour les ouvrir.
                     titres_categories = dict(audit.TITRES_CATEGORIES_RAPPORT)
@@ -209,10 +228,15 @@ if donnees:
                 col_transforme.caption(
                     "Déjà au format canonique — rien n'a été transformé avant l'audit."
                 )
+            # Nom de fichier distinct selon le mode : les deux modes donnent des contenus
+            # différents pour le même fichier déposé — un nom identique risquerait que l'un
+            # écrase l'autre dans le dossier de téléchargement si la personne récupère les
+            # deux (demandé le 2026-11-09).
+            suffixe_mode = "commentaires" if mode == "commentaires" else "complet"
             col_audit.download_button(
-                f"⬇️ Télécharger {nom_base} - audit.xlsx",
+                f"⬇️ Télécharger {nom_base} - audit ({suffixe_mode}).xlsx",
                 data=fichier["xlsx_bytes"],
-                file_name=f"{nom_base} - audit.xlsx",
+                file_name=f"{nom_base} - audit ({suffixe_mode}).xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key=f"xlsx-{fichier['nom']}",
             )

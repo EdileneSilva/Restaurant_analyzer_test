@@ -155,10 +155,6 @@ def _texte_titre_page_de_garde(wb):
     return None
 
 
-def _lot_depuis_page_de_garde(wb):
-    return _lot_depuis_titre(_texte_titre_page_de_garde(wb))
-
-
 def _trouve_ligne_entete_bpu(ws, max_lignes=8):
     derniere_ligne_cherchee = min(max_lignes, ws.max_row)
     for r in range(1, derniere_ligne_cherchee + 1):
@@ -976,7 +972,7 @@ FICHIER_BPUR_FRESCA = "1. BPUR FRESCA LOT 1 SURGELES CONV SIQO.xlsx"
 # serait dans le désordre sans ce zéro — décidé le 2026-10-30, appliqué aussi aux 4 fichiers
 # déjà traités (LOT 1/5/7 deviennent LOT 01/05/07 ; LOT 06 était déjà correct).
 def _lot_ardeche(numero, description):
-    return f"LOT {int(numero):02d} {description}"
+    return f"LOT {int(numero):02d} - {description}"
 
 
 FICHIERS_ARDECHE = {
