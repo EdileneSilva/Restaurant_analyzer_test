@@ -23,6 +23,12 @@ COULEUR_A_VERIFIER = pt.COULEUR_ORIGINE_INCERTAINE
 RE_POIDS_SEUL = re.compile(r"^\s*(\d+[.,]?\d*)\s*(kg|g|l|ml)\b", re.I)
 RE_PRIX_PAR_PIECE = re.compile(r"(\d+[.,]\d+)\s*€?\s*/\s*piece", re.I)
 RE_SIGNE_BIO = re.compile(r"\bab\b", re.I)
+# Le mot "bio" lui-même (pas seulement la sigle "AB") doit aussi déclencher Bio=X et sortir du
+# Label — vu le 2026-10-30 sur BPUR FRESCA ("BIO, V - LABEL" restait entièrement en Label, Bio
+# jamais coché, car "bio" ne contient pas "ab" comme mot séparé). Même logique que
+# pretraitement_a_formater._bio_et_label_ardeche, appliquée ici à la fonction partagée par
+# AGRICOURT/VDR/BOUCHERIE GRADA et BPUR FRESCA.
+RE_SIGNE_BIO_MOT = re.compile(r"\bbio(?:logique)?\b", re.I)
 RE_LIGNE_LOT = re.compile(r"^\s*lot\s*\d+.*$", re.I | re.M)
 
 
@@ -89,14 +95,18 @@ def _nombre(valeur):
 
 
 def _bio_et_label(signe):
-    """« AB » (ou « AB, équitable ») -> Bio=X, et le reste du texte (hors
-    « AB » lui-même) va dans Label s'il reste quelque chose (ex: 'équitable').
-    Sans « AB », tout le texte va dans Label (ex: 'LABEL ROUGE')."""
+    """« AB » ou le mot « bio » (ex: « AB, équitable », « BIO, V - LABEL ») -> Bio=X, et le
+    reste du texte (hors la mention bio elle-même) va dans Label s'il reste quelque chose (ex:
+    'équitable', 'V - LABEL'). Sans mention bio, tout le texte va dans Label (ex: 'LABEL
+    ROUGE')."""
     if not signe:
         return None, None
-    if not RE_SIGNE_BIO.search(pt._normalise(signe)):
+    norm = pt._normalise(signe)
+    if not (RE_SIGNE_BIO.search(norm) or RE_SIGNE_BIO_MOT.search(norm)):
         return None, signe
-    reste = RE_SIGNE_BIO.sub("", signe).strip(" ,;").strip()
+    reste = RE_SIGNE_BIO.sub("", signe)
+    reste = RE_SIGNE_BIO_MOT.sub("", reste)
+    reste = reste.strip(" ,;").strip()
     return "X", (reste or None)
 
 

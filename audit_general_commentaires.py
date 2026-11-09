@@ -1846,11 +1846,25 @@ def reconsidere_prix_inexplique(resultat, unite_ref, conditionnement, unite_cmd,
 # pretraitement.py (observée directement dans les fichiers de référence).
 # ============================================================================
 ORIGINES_LARGES = {"france", "ue", "union europeenne", "hors ue", "hors union europeenne", "monde"}
+# Synchronisé manuellement avec PAYS_UE/PAYS_HORS_UE de pretraitement_a_formater.py (et avec la
+# copie équivalente dans audit_general.py — les deux moteurs ne peuvent pas s'importer l'un
+# l'autre, voir catalogue_erreurs.md n°41) — demandé le 2026-10-30 après qu'un audit ait rejeté
+# comme "non reconnue" une Origine qu'un pays déjà ajouté là-bas. _normalise_origine ne touche
+# ni aux tirets ni aux apostrophes (contrairement à _normalise_pays, côté prétraitement), donc
+# certains pays apparaissent ici sous 2 formes (espace/tiret) pour couvrir les deux écritures
+# réellement vues dans les fichiers sources.
 PAYS_ORIGINE_CONNUS = {
     "espagne", "italie", "belgique", "chine", "royaume-uni", "royaume uni", "chili", "perou",
-    "irlande", "egypte", "asie", "allemagne", "portugal", "pays-bas", "maroc", "pologne",
-    "canada", "costa rica", "inde", "malaisie", "norvege", "bangladesh", "bresil", "usa",
-    "etats-unis", "nouvelle zelande", "islande", "grece",
+    "irlande", "egypte", "asie", "allemagne", "portugal", "pays-bas", "pays bas", "maroc",
+    "pologne", "canada", "costa rica", "inde", "malaisie", "norvege", "bangladesh", "bresil",
+    "usa", "etats-unis", "nouvelle zelande", "nouvelle-zelande", "islande", "grece",
+    "autriche", "bulgarie", "chypre", "croatie", "danemark", "estonie", "finlande", "hollande",
+    "hongrie", "lettonie", "lituanie", "luxembourg", "malte", "rep tcheque", "rep. tcheque",
+    "republique tcheque", "tchequie", "roumanie", "slovaquie", "slovenie", "suede",
+    "suisse", "russie", "cote divoire", "cote d'ivoire", "equateur", "el salvador",
+    "ile maurice", "turquie", "uk", "ecosse", "indonesie", "thailande", "mexique", "vietnam",
+    "serbie", "ukraine", "liechtenstein", "macedoine", "bosnie herzegovine",
+    "bosnie-herzegovine", "afrique du sud", "bolivie", "tunisie",
 }
 
 
@@ -2850,12 +2864,17 @@ def signale_champs_obligatoires_optionnels(ws, ligne_debut, col_marche, col_lot,
     def marque_champ(ligne, colonne, obligatoire, nom_champ):
         nonlocal total
         if obligatoire:
+            # Voir le commentaire équivalent dans audit_general.py : le préfixe "Champ
+            # obligatoire vide" est ce que calcule_categories_rapport recherche pour classer
+            # ce commentaire dans la bonne catégorie (bug trouvé le 2026-10-30).
             marque(ws.cell(row=ligne, column=colonne), COULEUR_CHAMP_OBLIGATOIRE_VIDE, None,
-                   f"Sans {nom_champ} de l'article, l'intégration ne sera pas possible.")
+                   f"Champ obligatoire vide : sans {nom_champ} de l'article, l'intégration ne "
+                   "sera pas possible.")
         else:
             marque(ws.cell(row=ligne, column=colonne), motor.COULEUR_A_VERIFIER, None,
-                   f"Sans {nom_champ} de l'article, l'intégration sera possible mais il est "
-                   "conseillé de le renseigner pour une meilleure qualité des données.")
+                   f"Champ optionnel vide : sans {nom_champ} de l'article, l'intégration sera "
+                   "possible mais il est conseillé de le renseigner pour une meilleure qualité "
+                   "des données.")
         total += 1
 
     for ligne in range(ligne_debut, ws.max_row + 1):

@@ -514,7 +514,7 @@ groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables, 
 | Base article groupement 3 | 234 | 1034 |
 | Base article groupement 4 | 198 | 1010 |
 | Base article groupement 5 | 219 | 896 |
-| Base article groupement commun | 772 | 1348 |
+| Base article groupement commun | 760 | 1310 |
 | MDC_IMPORT_MARCHE | 194 | 720 |
 
 Ces chiffres (`audit_general.py`, sortie dans `transformed_files/`) servent de résultat attendu
@@ -526,12 +526,23 @@ précédents (mesurés au 2026-10-22) reflètent l'accumulation des règles n°3
 changement — donc une cellule marquée en plus — sur chaque ligne concernée), pas une
 régression.
 
+> **Mise à jour (2026-10-30)** : "Base article groupement commun" baisse de 772→760 lignes et
+> 1348→1310 cellules suite à l'élargissement de `PAYS_ORIGINE_CONNUS` (synchronisé avec
+> `PAYS_UE`/`PAYS_HORS_UE` de `pretraitement_a_formater.py`, demandé le même jour) : 14 valeurs
+> d'Origine réellement présentes dans ce fichier (AUTRICHE, BULGARIE, COTE D'IVOIRE, EQUATEUR,
+> LITUANIE, NOUVELLE-ZÉLANDE, PAYS BAS, ROUMANIE, SUEDE, THAILANDE, TUNISIE, TURQUIE, VIETNAM)
+> étaient signalées à tort comme "non reconnue" — ce n'était pas une régression du code
+> d'audit, juste une liste de pays trop courte. Vérifié en comparant ligne par ligne les
+> résultats avant/après sur ce même fichier (seules ces 14 valeurs changent de statut).
+
 > `audit_general_commentaires.py` (sortie dans `commented_files/`) a ses propres totaux,
 > structurellement différents puisque cette version ne prend presque jamais de décision de
 > contenu (voir son docstring) : au 2026-10-26, 664 / 737 / 855 / 811 / 754 / 965 / 738
 > cellules marquées, dans le même ordre de fichiers que ci-dessus (total 5271 sur les 7
 > fichiers). Zéro doublon de commentaire et zéro changement sans effet réel (no-op) vérifiés
-> par balayage automatique sur les 7 fichiers à cette date.
+> par balayage automatique sur les 7 fichiers à cette date. **Mise à jour (2026-10-30)** :
+> "Base article groupement commun" passe de 965 à 927 cellules marquées, même cause que
+> ci-dessus (liste de pays élargie, identique dans les deux moteurs).
 
 > Historique : les totaux de cellules marquées de groupement 1 et 2 sont passés de 247→255
 > et 419→427 le 2026-10-15, suite à l'ajout de la règle n°10 ci-dessus (contenant à double

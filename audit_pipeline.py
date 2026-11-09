@@ -43,7 +43,10 @@ def _pretraite_fichiers(fichiers):
     """Partie commune aux deux moteurs d'audit : détection + formatage (pretraitement_auto),
     qui n'importe ni `audit_general` ni `audit_general_commentaires` et ne pose donc aucun
     risque de collision entre les deux. Renvoie (items, erreurs, notes_pretraitement) où
-    `items` est une liste de (nom, contenu_bytes_pretraite)."""
+    `items` est une liste de (nom, contenu_bytes_pretraite, a_ete_transforme) — ce 3e élément
+    sert à app.py pour ne proposer le téléchargement du fichier "formaté" que lorsqu'il diffère
+    réellement du fichier déposé (sinon, télécharger un fichier identique à l'original n'a pas
+    de sens et prête à confusion — demandé le 2026-11-09)."""
     items = []
     erreurs = []
     notes_pretraitement = []
@@ -88,8 +91,10 @@ def _pretraite_fichiers(fichiers):
                     "automatiquement avant l'audit."
                 )
         # À ce stade, `contenu` est toujours le contenu APRÈS prétraitement (transformé, ou
-        # identique au contenu déposé si rien n'avait besoin de l'être).
-        items.append((nom_fichier, contenu))
+        # identique au contenu déposé si rien n'avait besoin de l'être) — `nb_lignes is not
+        # None` couvre les deux cas où quelque chose a réellement changé (formatage ou
+        # conversion .xls), vu juste au-dessus.
+        items.append((nom_fichier, contenu, nb_lignes is not None))
 
     return items, erreurs, notes_pretraitement
 
@@ -98,11 +103,12 @@ def calcule_resultats(fichiers):
     """fichiers : liste de (nom, contenu_bytes). Renvoie un dict :
     {erreurs, notes_pretraitement, indice_prix, nb_fichiers, fichiers}, où chaque élément de
     "fichiers" est {nom, resultats, xlsx_bytes (après audit), xlsx_transforme_bytes (avant
-    audit)}. Moteur `audit_general` (corrections mécaniques + surlignage/commentaires)."""
+    audit), a_ete_transforme}. Moteur `audit_general` (corrections mécaniques + surlignage/
+    commentaires)."""
     items, erreurs, notes_pretraitement = _pretraite_fichiers(fichiers)
 
-    classeurs_valeurs, classeurs, noms, contenus_transformes = [], [], [], []
-    for nom_fichier, contenu in items:
+    classeurs_valeurs, classeurs, noms, contenus_transformes, flags_transforme = [], [], [], [], []
+    for nom_fichier, contenu, a_ete_transforme in items:
         try:
             wb_valeurs = audit.openpyxl.load_workbook(io.BytesIO(contenu), data_only=True)
             wb = audit.openpyxl.load_workbook(io.BytesIO(contenu), data_only=False)
@@ -113,6 +119,7 @@ def calcule_resultats(fichiers):
         classeurs.append(wb)
         noms.append(nom_fichier)
         contenus_transformes.append(contenu)
+        flags_transforme.append(a_ete_transforme)
 
     if not classeurs:
         return {
@@ -123,8 +130,8 @@ def calcule_resultats(fichiers):
     indice_prix = audit.construit_indice_prix_depuis_classeurs(classeurs_valeurs)
 
     fichiers_resultat = []
-    for nom_fichier, wb_valeurs, wb, contenu_transforme in zip(
-        noms, classeurs_valeurs, classeurs, contenus_transformes
+    for nom_fichier, wb_valeurs, wb, contenu_transforme, a_ete_transforme in zip(
+        noms, classeurs_valeurs, classeurs, contenus_transformes, flags_transforme
     ):
         resultats = audit.audite_classeur(wb_valeurs, wb, indice_prix)
         tampon_xlsx = io.BytesIO()
@@ -134,6 +141,7 @@ def calcule_resultats(fichiers):
             "resultats": resultats,
             "xlsx_bytes": tampon_xlsx.getvalue(),
             "xlsx_transforme_bytes": contenu_transforme,
+            "a_ete_transforme": a_ete_transforme,
         })
 
     return {
@@ -160,7 +168,7 @@ def calcule_resultats_commentaires(fichiers):
     with tempfile.TemporaryDirectory() as dossier_entree, \
          tempfile.TemporaryDirectory() as dossier_sortie:
         noms_temp = [f"{i}.xlsx" for i in range(len(items))]
-        for (_, contenu), nom_temp in zip(items, noms_temp):
+        for (_, contenu, _a_ete_transforme), nom_temp in zip(items, noms_temp):
             with open(os.path.join(dossier_entree, nom_temp), "wb") as f:
                 f.write(contenu)
 
@@ -182,7 +190,7 @@ def calcule_resultats_commentaires(fichiers):
             indice_prix = json.load(f)
 
         fichiers_resultat = []
-        for (nom_fichier, contenu_transforme), nom_temp in zip(items, noms_temp):
+        for (nom_fichier, contenu_transforme, a_ete_transforme), nom_temp in zip(items, noms_temp):
             with open(os.path.join(dossier_sortie, nom_temp), "rb") as f:
                 xlsx_bytes = f.read()
             with open(os.path.join(dossier_sortie, nom_temp + ".json"), encoding="utf-8") as f:
@@ -192,6 +200,7 @@ def calcule_resultats_commentaires(fichiers):
                 "resultats": resultats,
                 "xlsx_bytes": xlsx_bytes,
                 "xlsx_transforme_bytes": contenu_transforme,
+                "a_ete_transforme": a_ete_transforme,
             })
 
     return {

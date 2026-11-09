@@ -228,9 +228,12 @@ def _commande_miroir_reference(unite_ref, prix_ref):
 # de PAYS_ETRANGERS_CONNUS (Inde, Indonésie, Equateur, USA, Thaïlande, Grèce, Rép. Tchèque).
 # Remplacé ici, pour les familles BPU DQE et BPUR FRESCA, par une logique dédiée : plusieurs
 # pays séparés par "," ou "/" ou " - " => "UE" si tous les pays listés sont dans l'Union
-# européenne, "NON UE" si aucun ne l'est, "UE" par défaut sinon (mélange UE/non UE) — règle
-# volontairement simple, demandée telle quelle le 2026-10-29 ("por enquanto deixe assim, pq
-# honestamente nem faz sentido"). Un seul pays reste inchangé (délégué à pt.traite_origine s'il
+# européenne, "Hors UE" si aucun ne l'est (PAS "NON UE" : audit_general.ORIGINES_LARGES ne
+# reconnaît que "hors ue" parmi les 4 grandes catégories — "non ue" aurait été rejeté comme
+# origine non reconnue ; bug trouvé le 2026-10-30 lors d'un test manuel), et si mélange (un pays
+# UE + un pays hors UE), les deux noms sont gardés tels quels plutôt que résumés — demandé
+# explicitement le 2026-10-30 (avant : "UE" par défaut, jugé trompeur). Un seul pays reste
+# inchangé (délégué à pt.traite_origine s'il
 # n'est pas l'un des ajouts ci-dessous), sauf Indonésie/Thaïlande, toujours réécrits avec leur
 # accent. Chez FRESCA spécifiquement, beaucoup de valeurs sont des zones de pêche ("Océan
 # Pacifique (FAO 61/67)"...) et pas des pays du tout : jamais découpées par cette logique,
@@ -323,8 +326,8 @@ def _origine_bpu(valeur_brute):
         if all(est_ue):
             return "UE", False, None
         if not any(est_ue):
-            return "NON UE", False, None
-        return "UE", False, None  # mélange UE/non UE : défaut UE, cf. docstring du module
+            return "Hors UE", False, None
+        return texte, False, None  # mélange UE/hors UE : les deux noms gardés, cf. docstring
 
     pays_norm = _normalise_pays(RE_PARENTHESE.sub(" ", texte).strip())
     if pays_norm == "indonesie":
@@ -579,11 +582,24 @@ def transforme_episaveurs(chemin_source, chemin_sortie):
     return nb_lignes
 
 
+def _tronque_titre_lot_fresca(lot_global):
+    """Le titre de lot BPUR FRESCA a 2 tirets (ex: "LOT 1 – PRODUITS SURGELES –
+    CONVENTIONNEL ET SIQO") : seuls les 2 premiers segments (jusqu'au "–" qui précède
+    "CONVENTIONNEL ET SIQO") forment le vrai nom du lot — le reste est une mention
+    administrative sans intérêt pour l'audit. Demandé explicitement par le métier."""
+    segments = re.split(r"\s*[–-]\s*", lot_global)
+    if len(segments) >= 2:
+        return " – ".join(segments[:2])
+    return lot_global
+
+
 def transforme_bpur_fresca(chemin_source, chemin_sortie, fournisseur="FRESCA"):
     wb = openpyxl.load_workbook(chemin_source, data_only=True)
     ws = wb.worksheets[0]
 
-    lot_global = pg.extrait_titre_lot(ws.cell(row=3, column=1).value) or ws.title
+    lot_global = _tronque_titre_lot_fresca(
+        pg.extrait_titre_lot(ws.cell(row=3, column=1).value) or ws.title
+    )
 
     ligne_entete = 6
     col_famille, col_numero, col_intitule, col_desig_fourn = 1, 2, 3, 4
@@ -592,10 +608,15 @@ def transforme_bpur_fresca(chemin_source, chemin_sortie, fournisseur="FRESCA"):
 
     ligne_debut = ligne_entete + 1
     ligne_fin = pg._derniere_ligne_avec_reference(ws, ligne_debut, col_numero)
+    # _lots_par_section repère une "section" (ex: "CONDIMENTS") par ligne, mais elle n'entre PAS
+    # dans le Lot écrit en sortie (seulement ignorée ci-dessous, via _) : ajouter la section au
+    # Lot créerait, pour un même numéro de lot, autant de noms de Lot différents que de
+    # sections — demandé explicitement le 2026-10-30 ("um mesmo nome de lote não pode ter
+    # diferentes nomes"). Le Lot reste donc `lot_global` seul, identique pour toutes les lignes.
     lots = pg._lots_par_section(ws, ligne_debut, ligne_fin, col_famille, col_numero)
 
     lignes = []
-    for r, section in lots.items():
+    for r, _section in lots.items():
         designation = ws.cell(row=r, column=col_intitule).value
         if not designation:
             continue
@@ -616,7 +637,7 @@ def transforme_bpur_fresca(chemin_source, chemin_sortie, fournisseur="FRESCA"):
         valeur_origine, _, commentaire_origine = _origine_bpu(origine_brute)
 
         lignes.append(pg._ligne_vide_de_base(
-            fournisseur=fournisseur, lot=pg._combine_lot(lot_global, section),
+            fournisseur=fournisseur, lot=lot_global,
             designation=designation, unite_ref=unite_ref, poids=poids_kg,
             commentaire_unite=commentaire_unite, cond=cond_a_ecrire, desig_fourn=desig_fourn,
             ref=None, prix_ref=prix, unite_cmd=unite_cmd, prix_cmd=prix_cmd, local=None,
@@ -650,13 +671,14 @@ def transforme_bpur_fresca(chemin_source, chemin_sortie, fournisseur="FRESCA"):
 #   jamais dans un calcul de prix — voir `_unite_reference_ardeche` pour le détail des deux cas
 #   (Cond. exprimé dans l'unité de commande elle-même quand elle n'est pas KG/L, confirmé par
 #   DADS "Yaourt ... (x48) 125 g" / Cond.=48 ; Cond. exprimé en KG/L quand elle l'est déjà).
-# - Origine = "Origine matière première" seulement (pas "Pays de transformation") : c'est la
-#   colonne qui porte l'info utile pour le sourcing local/traçabilité (régions ARDECHE/AURA/
-#   ISERE/SAVOIE, confirmées présentes telles quelles dans cette colonne — voir REGIONS_FRANCE
-#   ci-dessous), alors que "Pays de transformation" ne décrit que le lieu de transformation/
-#   conditionnement (jamais une région française, toujours un pays, y compris quand la matière
-#   première elle-même est étrangère ou française) — moins pertinent pour ce que la colonne
-#   canonique "Origine" est censée représenter.
+# - Origine = "Pays de transformation" (demandé par le métier le 2026-11-09, après retour sur
+#   le mapping de colonnes — avant cette date, "Origine matière première" était utilisée à sa
+#   place). "Origine matière première" reste malgré tout lue séparément, UNIQUEMENT pour
+#   calculer Local (_local_ardeche) : c'est elle qui porte les régions ARDECHE/AURA/ISERE/
+#   SAVOIE (voir REGIONS_FRANCE ci-dessous) quand la matière première est française, alors que
+#   "Pays de transformation" ne décrit que le lieu de transformation/conditionnement (jamais une
+#   région française, toujours un pays) — les deux colonnes sont donc complémentaires, pas
+#   interchangeables : Origine vient de l'une, Local de l'autre.
 # - "Signes" : "AB" et tout tag contenant le mot "bio" (ex: "Bio Part.", vu le 2026-10-30) sont
 #   des signes bio ("ABE" l'accompagne toujours, jamais seul, aucune source ne le confirme
 #   comme label officiel séparé — traité comme faisant partie du même signal bio) ; "null"
@@ -749,7 +771,17 @@ def _unite_reference_ardeche(designation, unite_cmd, prix_cmd, cond):
         if m:
             poids_kg = float(m.group(1).replace(",", ".")) * (0.001 if m.group(2).lower() == "g" else 1)
             if poids_kg:
-                prix_kg = round(prix_cmd / poids_kg, 3) if prix_cmd is not None else None
+                # Quand l'unité de commande est un contenant (BOITE, SACHET...), le poids
+                # trouvé en fin de désignation ne décrit qu'UNE pièce dedans — le contenant
+                # vendu (l'UC) pèse Cond fois ce poids, donc Cond entre dans la conversion.
+                # Quand l'UC est déjà PIECE (une seule pièce vendue à l'unité), Cond ne compte
+                # que combien de pièces sont groupées dans le même sachet/plateau source, sans
+                # rapport avec le prix de CETTE pièce-ci — confirmé le 2026-10-30 : "Quenelle
+                # nature (x16) 120 g", Cond=16, UC=UN, PU=0,550€ (prix d'UNE quenelle de 120g,
+                # pas de 16) ; à l'inverse "Brioche... 800 g", Cond=6, UC=BT (BOITE), PU=6,716€
+                # est le prix de la BOITE de 6, donc 6*0,8=4,8 kg, pas 0,8 kg.
+                poids_total_kg = poids_kg if unite_cmd == "PIECE" else poids_kg * n
+                prix_kg = round(prix_cmd / poids_total_kg, 3) if prix_cmd is not None else None
                 cond_ecrit = _texte_conditionnement(n, pt._formate_quantite(poids_kg, "kg"), unite_cmd)
                 return "KG", None, prix_kg, None, cond_ecrit
 
@@ -759,7 +791,9 @@ def _unite_reference_ardeche(designation, unite_cmd, prix_cmd, cond):
             unite_vol = m.group(2).lower()
             volume_l = float(m.group(1).replace(",", ".")) * facteurs[unite_vol]
             if volume_l:
-                prix_l = round(prix_cmd / volume_l, 3) if prix_cmd is not None else None
+                # Même logique que pour le poids ci-dessus (contenant vs pièce vendue seule).
+                volume_total_l = volume_l if unite_cmd == "PIECE" else volume_l * n
+                prix_l = round(prix_cmd / volume_total_l, 3) if prix_cmd is not None else None
                 cond_ecrit = _texte_conditionnement(n, pt._formate_quantite(volume_l, "l"), unite_cmd)
                 return "L", None, prix_l, None, cond_ecrit
 
@@ -839,6 +873,7 @@ def _bio_et_label_ardeche(signes_brut):
 
 
 COL_ARDECHE_REF, COL_ARDECHE_DESIGNATION, COL_ARDECHE_SIGNES = 2, 3, 4
+COL_ARDECHE_PAYS_TRANSFORMATION = 8
 COL_ARDECHE_ORIGINE_MP = 9
 COL_ARDECHE_COND, COL_ARDECHE_PRIX, COL_ARDECHE_FACT, COL_ARDECHE_UC = 10, 11, 12, 13
 COL_ARDECHE_PU = 15
@@ -863,10 +898,19 @@ def transforme_ardeche(chemin_source, chemin_sortie, fournisseur, lot):
             continue
         reference = ws.cell(row=r, column=COL_ARDECHE_REF).value
         signes = ws.cell(row=r, column=COL_ARDECHE_SIGNES).value
-        origine_brute = ws.cell(row=r, column=COL_ARDECHE_ORIGINE_MP).value
+        pays_transformation = ws.cell(row=r, column=COL_ARDECHE_PAYS_TRANSFORMATION).value
+        origine_mp_brute = ws.cell(row=r, column=COL_ARDECHE_ORIGINE_MP).value
         cond = ws.cell(row=r, column=COL_ARDECHE_COND).value
         uc_brut = ws.cell(row=r, column=COL_ARDECHE_UC).value
-        prix_commande = _arrondi_prix(_nombre_ardeche(ws.cell(row=r, column=COL_ARDECHE_PU).value))
+        # Prix de commande = "Prix" ÷ "Fact." (recalculé nous-mêmes plutôt que de lire "PU",
+        # qui porte pourtant la même valeur déjà précalculée côté source) : "Fact." n'est PAS
+        # toujours 1 (vérifié sur les 12 fichiers MP ARDECHE 24 : va de 0,04 à 200 selon le
+        # fichier), donc s'appuyer sur "Prix"/"Fact." directement est plus robuste qu'une
+        # colonne dérivée dont on ne contrôle pas le calcul — décidé avec l'utilisateur le
+        # 2026-11-09, suite à un retour du métier sur le mapping de colonnes de ce fichier.
+        prix_brut = _nombre_ardeche(ws.cell(row=r, column=COL_ARDECHE_PRIX).value)
+        fact = _nombre_ardeche(ws.cell(row=r, column=COL_ARDECHE_FACT).value) or 1
+        prix_commande = _arrondi_prix(prix_brut / fact) if prix_brut is not None else None
 
         unite_cmd = _unite_commande_ardeche(uc_brut, designation)
         unite_ref, poids_ou_volume, prix_ref, commentaire_unite, cond_propose = _unite_reference_ardeche(
@@ -875,8 +919,13 @@ def transforme_ardeche(chemin_source, chemin_sortie, fournisseur, lot):
         cond_a_ecrire = cond_propose if cond_propose else cond
 
         bio_x, label = _bio_et_label_ardeche(signes)
-        valeur_origine, _, commentaire_origine = _origine_bpu(origine_brute)
-        local_x = _local_ardeche(origine_brute)
+        # Origine = "Pays de transformation" (demandé par le métier le 2026-11-09, pas
+        # "Origine matière première" comme avant — voir le commentaire de section plus haut,
+        # resté correct pour expliquer pourquoi "Origine matière première" est gardée ci-dessous
+        # UNIQUEMENT pour Local). "Pays de transformation" ne contient jamais de région
+        # française (toujours un pays), donc ne casse pas _origine_bpu.
+        valeur_origine, _, commentaire_origine = _origine_bpu(pays_transformation)
+        local_x = _local_ardeche(origine_mp_brute)
 
         lignes.append(pg._ligne_vide_de_base(
             fournisseur=fournisseur, lot=lot, designation=designation, unite_ref=unite_ref,

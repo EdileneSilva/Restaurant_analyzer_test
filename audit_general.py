@@ -1871,9 +1871,16 @@ def reconsidere_prix_inexplique(resultat, unite_ref, conditionnement, unite_cmd,
 ORIGINES_LARGES = {"france", "ue", "union europeenne", "hors ue", "hors union europeenne", "monde"}
 PAYS_ORIGINE_CONNUS = {
     "espagne", "italie", "belgique", "chine", "royaume-uni", "royaume uni", "chili", "perou",
-    "irlande", "egypte", "asie", "allemagne", "portugal", "pays-bas", "maroc", "pologne",
-    "canada", "costa rica", "inde", "malaisie", "norvege", "bangladesh", "bresil", "usa",
-    "etats-unis", "nouvelle zelande", "islande", "grece",
+    "irlande", "egypte", "asie", "allemagne", "portugal", "pays-bas", "pays bas", "maroc",
+    "pologne", "canada", "costa rica", "inde", "malaisie", "norvege", "bangladesh", "bresil",
+    "usa", "etats-unis", "nouvelle zelande", "nouvelle-zelande", "islande", "grece",
+    "autriche", "bulgarie", "chypre", "croatie", "danemark", "estonie", "finlande", "hollande",
+    "hongrie", "lettonie", "lituanie", "luxembourg", "malte", "rep tcheque", "rep. tcheque",
+    "republique tcheque", "tchequie", "roumanie", "slovaquie", "slovenie", "suede",
+    "suisse", "russie", "cote divoire", "cote d'ivoire", "equateur", "el salvador",
+    "ile maurice", "turquie", "uk", "ecosse", "indonesie", "thailande", "mexique", "vietnam",
+    "serbie", "ukraine", "liechtenstein", "macedoine", "bosnie herzegovine",
+    "bosnie-herzegovine", "afrique du sud", "bolivie", "tunisie",
 }
 
 

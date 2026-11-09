@@ -29,7 +29,7 @@ TOTAUX_CELLULES = {
     "2026 09 22 Base article groupement 3.xlsx": 855,
     "2026 09 22 Base article groupement 4.xlsx": 811,
     "2026 09 22 Base article groupement 5.xlsx": 754,
-    "2026 09 22 Base article groupement commun.xlsx": 965,
+    "2026 09 22 Base article groupement commun.xlsx": 927,
     "MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx": 738,
 }
 

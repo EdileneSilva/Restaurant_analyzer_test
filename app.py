@@ -191,16 +191,24 @@ if donnees:
 
             nom_base = fichier["nom"].rsplit(".", 1)[0]
             col_transforme, col_audit = st.columns(2)
-            col_transforme.download_button(
-                f"⬇️ Télécharger {nom_base} - formaté (avant audit).xlsx",
-                data=fichier["xlsx_transforme_bytes"],
-                file_name=f"{nom_base} - formaté.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f"xlsx-transforme-{fichier['nom']}",
-                help="Le fichier tel qu'il était juste avant l'audit (déjà au format cible, "
-                     "mais sans le surlignage ni les commentaires de l'audit) — utile pour "
-                     "vérifier le formatage indépendamment du résultat de l'audit.",
-            )
+            if fichier.get("a_ete_transforme"):
+                col_transforme.download_button(
+                    f"⬇️ Télécharger {nom_base} - formaté (avant audit).xlsx",
+                    data=fichier["xlsx_transforme_bytes"],
+                    file_name=f"{nom_base} - formaté.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"xlsx-transforme-{fichier['nom']}",
+                    help="Le fichier tel qu'il était juste avant l'audit (déjà au format cible, "
+                         "mais sans le surlignage ni les commentaires de l'audit) — utile pour "
+                         "vérifier le formatage indépendamment du résultat de l'audit.",
+                )
+            else:
+                # Rien n'a été transformé (fichier déjà canonique) : proposer quand même ce
+                # téléchargement redonnerait un contenu identique à celui déposé, ce qui prête
+                # à confusion plutôt que d'aider — demandé le 2026-11-09.
+                col_transforme.caption(
+                    "Déjà au format canonique — rien n'a été transformé avant l'audit."
+                )
             col_audit.download_button(
                 f"⬇️ Télécharger {nom_base} - audit.xlsx",
                 data=fichier["xlsx_bytes"],
