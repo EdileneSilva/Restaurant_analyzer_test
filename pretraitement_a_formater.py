@@ -721,76 +721,105 @@ def _nombre_entier_cond(cond):
     return max(1, int(round(valeur))) if valeur else 1
 
 
-def _texte_conditionnement(n, quantite_texte, conteneur):
+def _texte_conditionnement(n, quantite_texte, conteneur, unite_individuelle=False):
     """Assemble le Conditionnement final à partir d'une quantité déjà formatée (via
     pt._formate_quantite) — ne passe PAS par pt.reecrit_conditionnement : cette dernière
     réanalyse le texte avec sa propre regex (format "N x qté"), qui ne reconnaît que les cas
     où `n` ET `conteneur` sont établis autrement (REGAL) ; ici les deux sont déjà connus avec
     certitude, donc assemblés directement, même logique de rendu qu'elle ("CONTENANT DE N X
-    QTE", ou juste la quantité si n=1 et pas de contenant)."""
-    if conteneur == "PIECE" and n > 1:
-        # "PIECE" décrit une pièce individuelle : au pluriel avec un multiplicateur, "PIECE DE
-        # N X qté" se lit à tort comme "une pièce de N×qté" plutôt que "N pièces de qté
-        # chacune" — et ce texte, repris tel quel par l'audit (qui cherche des motifs "N X
-        # qté" dans le Conditionnement pour vérifier le prix), créait un faux signalement
-        # d'incohérence. Corrigé en mettant le nombre avant et "PIECE" au pluriel ("N PIECES
-        # DE qté"), qui ne matche plus ce motif — trouvé et demandé le 2026-11-09.
-        return f"{n} PIECES DE {quantite_texte}"
+    QTE", ou juste la quantité si n=1 et pas de contenant).
+
+    `unite_individuelle=True` dit que `conteneur` nomme l'unité vendue ELLE-MÊME (ex: "PIECE",
+    "UNITÉ", mais aussi un mot de contenant trouvé dans la désignation comme "POT" quand le
+    code source est "UN" — un pot = une part, pas un carton qui en regrouperait plusieurs) :
+    au pluriel avec le nombre devant, "N POTS DE qté" plutôt que "POT DE N X qté", qui se
+    lirait à tort comme "un pot contenant N×qté" plutôt que "N pots de qté chacun" — et ce
+    texte, repris tel quel par l'audit (qui cherche des motifs "N X qté" dans le
+    Conditionnement pour vérifier le prix), créait un faux signalement d'incohérence. Trouvé
+    sur "Yaourt ... pot carton (x48) 125 g" (le "carton" regroupe 48 "pot", chacun = 1 part de
+    125 g — le mot reconnu dans la désignation est "pot", pas "carton", absent de la liste de
+    mots de contenant reconnus) — demandé le 2026-11-09. `unite_individuelle=False` (le
+    défaut) garde le sens inverse : `conteneur` nomme un contenant qui REGROUPE n unités plus
+    petites (ex: "BOITE DE 6 X 800 G")."""
+    if conteneur and unite_individuelle and n > 1:
+        mot_pluriel = "UNITÉS" if conteneur == "UNITÉ" else f"{conteneur}S"
+        return f"{n} {mot_pluriel} DE {quantite_texte}"
     if conteneur:
         return f"{conteneur} DE {n} X {quantite_texte}" if n > 1 else f"{conteneur} DE {quantite_texte}"
     return f"{n} X {quantite_texte}" if n > 1 else quantite_texte
 
 
-def _unite_reference_ardeche(designation, unite_cmd, prix_cmd, cond):
+def _unite_reference_ardeche(designation, mot_cond, prix_cmd, cond, base_uc):
     """Cherche dans la fin de `designation` de quoi déduire une unité de référence plus
     fiable que l'unité de commande telle quelle, et le Conditionnement qui va avec — voir le
     commentaire de section ci-dessus pour la règle. Renvoie (unite_ref, poids_ou_none,
     prix_ref, commentaire_ou_none, conditionnement_ou_none).
 
+    `mot_cond` (voir _mot_contenant_ardeche) est le mot utilisé pour le Conditionnement et,
+    ici, l'Unité de référence — PAS la colonne Unité de commande elle-même (qui recopie le
+    code source tel quel, voir _unite_commande_ardeche) : ex: "BRIQUE", "SEAU", "UNITÉ".
+    `base_uc` est le code source normalisé ("kg"/"l"/"un"/"autre") et décide SEUL si Cond. doit
+    multiplier le prix — jamais `mot_cond`, pour ne pas faire dépendre un calcul de prix du
+    vocabulaire trouvé dans un texte libre. Séparation demandée par l'utilisateur le
+    2026-11-09 (trouvé sur "Lait fermenté ... brique 1 lt", code source "LT", où le mot
+    "brique" disparaissait avant alors qu'il n'aurait dû changer que l'affichage, jamais le
+    calcul) ; et la colonne Unité de commande a ensuite été remise à recopier le code source
+    tel quel, toute incohérence avec `mot_cond`/le Conditionnement étant désormais détectée
+    par l'audit (verifie_unite_commande_etendue), pas devinée ici.
+
     Le 2e élément (poids à l'unité de référence) est TOUJOURS None pour cette famille : cette
     colonne n'est prévue que pour Unité de référence = PC (format_cible.md ligne 31), jamais
-    le cas ici (KG, L, BOITE N/M, ou l'unité de commande telle quelle) — le détail de poids
-    par pièce, quand il est connu, va dans le texte du Conditionnement, pas dans cette colonne.
+    le cas ici (KG, L, BOITE N/M, ou `mot_cond` tel quel) — le détail de poids par pièce,
+    quand il est connu, va dans le texte du Conditionnement, pas dans cette colonne.
 
-    Si l'unité de commande est déjà KG ou L, aucune conversion n'est cherchée : le prix de
-    commande (PU) est déjà le prix par KG/L (confirmé par l'utilisateur), donc Unité de
-    référence = Unité de commande et Prix de référence = Prix de commande directement. Seul le
-    Conditionnement est reconstruit à partir du nombre brut "Cond." (déjà exprimé dans cette
-    même unité — ex: LDC, "Cond." = poids total du colis en kg)."""
-    if unite_cmd in ("KG", "L"):
+    Si le code source est déjà KG ou L, aucune conversion n'est cherchée : le prix de commande
+    (PU) est déjà le prix par KG/L (confirmé par l'utilisateur), donc Unité de référence = KG/L
+    et Prix de référence = Prix de commande directement. Seul le Conditionnement est
+    reconstruit à partir du nombre brut "Cond." (déjà exprimé dans cette même unité — ex: LDC,
+    "Cond." = poids total du colis en kg), précédé de `mot_cond` s'il en nomme un
+    (ex: "SEAU DE 10L")."""
+    if base_uc in ("kg", "l"):
         valeur = pg._nombre(cond)
-        cond_ecrit = pt._formate_quantite(valeur, unite_cmd.lower()) if valeur else None
-        return unite_cmd, None, prix_cmd, None, cond_ecrit
+        unite_ref_finale = "KG" if base_uc == "kg" else "L"
+        quantite_texte = pt._formate_quantite(valeur, base_uc) if valeur else None
+        cond_ecrit = (f"{mot_cond} DE {quantite_texte}"
+                      if quantite_texte and mot_cond != unite_ref_finale else quantite_texte)
+        return unite_ref_finale, None, prix_cmd, None, cond_ecrit
 
     texte = str(designation or "").strip()
     # Ici "Cond." est exprimé dans l'unité de commande elle-même (ex: nombre de boîtes, ou
     # nombre de pièces — confirmé par l'exemple DADS "Yaourt ... (x48) 125 g" / Cond.=48,000)
     # : utilisable tel quel comme multiplicateur "N X ...", sans division par un poids-pièce.
     n = _nombre_entier_cond(cond)
+    # Jamais multiplié par Cond. : base source "un" (une unité sans ambiguïté, quel que soit
+    # `mot_cond`), ou code de boîte en N/M ("BOITE 3/1" — la boîte EST l'unité vendue, Cond.
+    # ne compte que combien de boîtes, jamais un poids à l'intérieur de CETTE boîte-ci).
+    code_boite = mot_cond.startswith("BOITE ") and "/" in mot_cond
+    jamais_multiplier = base_uc == "un" or code_boite
 
     if not RE_ARDECHE_FOURCHETTE.search(texte):
-        m = RE_ARDECHE_BOITE.search(texte)
-        if m:
-            boite = f"BOITE {m.group(1).replace(' ', '')}"
-            cond_ecrit = _texte_conditionnement(n, boite, None)
-            return boite, None, prix_cmd, None, cond_ecrit
+        if code_boite:
+            cond_ecrit = _texte_conditionnement(n, mot_cond, None)
+            return mot_cond, None, prix_cmd, None, cond_ecrit
 
         m = RE_ARDECHE_POIDS.search(texte)
         if m:
             poids_kg = float(m.group(1).replace(",", ".")) * (0.001 if m.group(2).lower() == "g" else 1)
             if poids_kg:
-                # Quand l'unité de commande est un contenant (BOITE, SACHET...), le poids
-                # trouvé en fin de désignation ne décrit qu'UNE pièce dedans — le contenant
-                # vendu (l'UC) pèse Cond fois ce poids, donc Cond entre dans la conversion.
-                # Quand l'UC est déjà PIECE (une seule pièce vendue à l'unité), Cond ne compte
-                # que combien de pièces sont groupées dans le même sachet/plateau source, sans
-                # rapport avec le prix de CETTE pièce-ci — confirmé le 2026-10-30 : "Quenelle
-                # nature (x16) 120 g", Cond=16, UC=UN, PU=0,550€ (prix d'UNE quenelle de 120g,
-                # pas de 16) ; à l'inverse "Brioche... 800 g", Cond=6, UC=BT (BOITE), PU=6,716€
-                # est le prix de la BOITE de 6, donc 6*0,8=4,8 kg, pas 0,8 kg.
-                poids_total_kg = poids_kg if unite_cmd == "PIECE" else poids_kg * n
+                # Quand l'unité vendue est un contenant qui groupe plusieurs pièces (BOITE,
+                # SACHET...), le poids trouvé en fin de désignation ne décrit qu'UNE pièce
+                # dedans — le contenant vendu pèse Cond fois ce poids, donc Cond entre dans la
+                # conversion. Quand la base source est "un" (une seule unité vendue à la
+                # fois), Cond ne compte que combien d'unités sont groupées dans le même
+                # sachet/plateau source, sans rapport avec le prix de CETTE unité-ci —
+                # confirmé le 2026-10-30 : "Quenelle nature (x16) 120 g", Cond=16, UC=UN,
+                # PU=0,550€ (prix d'UNE quenelle de 120g, pas de 16) ; à l'inverse
+                # "Brioche... 800 g", Cond=6, UC=BT (mot BOITE générique), PU=6,716€ est le
+                # prix de la BOITE de 6, donc 6*0,8=4,8 kg, pas 0,8 kg.
+                poids_total_kg = poids_kg if jamais_multiplier else poids_kg * n
                 prix_kg = round(prix_cmd / poids_total_kg, 3) if prix_cmd is not None else None
-                cond_ecrit = _texte_conditionnement(n, pt._formate_quantite(poids_kg, "kg"), unite_cmd)
+                cond_ecrit = _texte_conditionnement(
+                    n, pt._formate_quantite(poids_kg, "kg"), mot_cond, jamais_multiplier)
                 return "KG", None, prix_kg, None, cond_ecrit
 
         m = RE_ARDECHE_VOLUME.search(texte)
@@ -799,40 +828,54 @@ def _unite_reference_ardeche(designation, unite_cmd, prix_cmd, cond):
             unite_vol = m.group(2).lower()
             volume_l = float(m.group(1).replace(",", ".")) * facteurs[unite_vol]
             if volume_l:
-                # Même logique que pour le poids ci-dessus (contenant vs pièce vendue seule).
-                volume_total_l = volume_l if unite_cmd == "PIECE" else volume_l * n
+                # Même logique que pour le poids ci-dessus (contenant vs unité vendue seule).
+                volume_total_l = volume_l if jamais_multiplier else volume_l * n
                 prix_l = round(prix_cmd / volume_total_l, 3) if prix_cmd is not None else None
-                cond_ecrit = _texte_conditionnement(n, pt._formate_quantite(volume_l, "l"), unite_cmd)
+                cond_ecrit = _texte_conditionnement(
+                    n, pt._formate_quantite(volume_l, "l"), mot_cond, jamais_multiplier)
                 return "L", None, prix_l, None, cond_ecrit
 
-    # Rien d'exploitable (fourchette, ou aucun poids/volume/code boîte en fin de texte) :
-    # l'unité de référence reste celle de commande, sans conversion inventée, et le
-    # Conditionnement reste le "Cond." brut de la source (pas de quantité à y insérer).
-    return unite_cmd, None, prix_cmd, None, None
+    if jamais_multiplier and n and n > 1:
+        # Rien d'exploitable comme poids/volume (ex: "Oeuf frais plein air 53/63 (x30)"), mais
+        # Cond. reste un pur compte ici (jamais un multiplicateur de prix) : au moins dire
+        # "N <mot>S" plutôt qu'un nombre brut sans unité — demandé le 2026-11-09.
+        mot_pluriel = "UNITÉS" if mot_cond == "UNITÉ" else f"{mot_cond}S"
+        return mot_cond, None, prix_cmd, None, f"{n} {mot_pluriel}"
+
+    # Rien d'exploitable (fourchette, ou aucun poids/volume/code boîte en fin de texte, et pas
+    # un simple compte d'unités) : l'unité de référence reste `mot_cond`, sans conversion
+    # inventée, et le Conditionnement reste le "Cond." brut de la source.
+    return mot_cond, None, prix_cmd, None, None
 
 
-def _unite_commande_ardeche(uc_brut, designation):
-    """"UC" (KG/LT/BT/UN) est un code générique — "BT" ne veut pas toujours dire
-    "bouteille" (vu aussi bien sur un sachet, un sac ou une vraie bouteille, vérifié le
-    2026-10-29). Le mot de contenant réellement écrit dans la désignation est préféré quand
-    il existe (laissé en français : `audit_general.py` le normalise déjà automatiquement à
-    l'audit, même logique que pour les autres familles de ce fichier) ; sinon, secours sur le
-    code lui-même. Un code de contenant en N/M ("bt 3/1", "bt 4/4") prime sur le mot générique
-    et est gardé complet ("BOITE 3/1", pas juste "BOITE" — confirmé par l'utilisateur le
-    2026-10-30, format déjà accepté : voir unites_commande_non_reconnues.md)."""
+def _base_uc_ardeche(uc_brut):
+    """Catégorie SOURCE du code "UC" brut (KG/LT/UN/BT...), utilisée uniquement par
+    _unite_reference_ardeche pour décider si Cond. doit multiplier le prix — jamais pour
+    choisir le mot affiché (voir _unite_commande_ardeche). "kg"/"l"/"un" sont des bases sans
+    ambiguïté (Cond. n'est jamais un multiplicateur de prix) ; tout le reste ("autre", ex: le
+    code "BT") reste ambigu, résolu au cas par cas dans _unite_reference_ardeche."""
     norm = pt._normalise(uc_brut)
     if norm == "kg":
-        return "KG"
+        return "kg"
     if norm == "lt":
-        return "L"
+        return "l"
     if norm == "un":
-        # "UN" est déjà un code sans ambiguïté (une pièce) : ne pas le laisser écraser par un
-        # mot de contenant trouvé dans la désignation (ex: "Yaourt ... pot carton (x48) 125 g",
-        # Cond=48 — le mot "pot" décrit l'emballage INDIVIDUEL de la pièce elle-même, pas un
-        # contenant vendu à part ; le prendre pour l'unité de commande multipliait le poids par
-        # 48 à tort, donnant un prix au kg 48 fois trop bas. Trouvé le 2026-11-09 sur DADS
-        # Lot 06 Crèmerie.) Contrairement à "BT", "UN" n'a qu'un seul sens possible.
-        return "PIECE"
+        return "un"
+    return "autre"
+
+
+def _mot_contenant_ardeche(uc_brut, designation):
+    """Mot utilisé pour enrichir le Conditionnement et, dans certains cas déjà confirmés
+    (contenant imbriqué, voir format_cible.md), l'Unité de référence (BPU) elle-même —
+    JAMAIS la colonne Unité de commande, qui recopie le code source tel quel (voir
+    _unite_commande_ardeche, juste en dessous). Le mot de contenant réellement écrit dans la
+    désignation (seau, brique, pot, sachet...) ou un code de boîte en N/M ("bt 3/1", "bt
+    4/4", gardé complet — "BOITE 3/1", pas juste "BOITE", confirmé le 2026-10-30, format déjà
+    accepté : voir unites_commande_non_reconnues.md) sont préférés quand ils existent, même
+    quand le code source était déjà "KG"/"LT"/"UN" (ex: "Lait fermenté ... brique 1 lt", code
+    source "LT" -> mot "BRIQUE" ; "Crème fraîche ... seau 10 lt", code source "LT" -> "SEAU").
+    Sans mot trouvé, replie sur le mot générique du code source (KG/L/UNITÉ, ou le code brut
+    tel quel pour un code ambigu comme "BT")."""
     m = RE_ARDECHE_BOITE.search(str(designation or ""))
     if m:
         return f"BOITE {m.group(1).replace(' ', '')}"
@@ -840,11 +883,26 @@ def _unite_commande_ardeche(uc_brut, designation):
     if m:
         mot = pt._normalise(m.group(1))
         return "BOITE" if mot in ("bt", "bte", "boite") else mot.upper()
-    # "BT" sans aucun indice dans la désignation (ni mot de contenant, ni code boîte en N/M) :
-    # pas de défaut fiable à deviner (ex: "Lait ... UHT BIO" — un "BT" de lait n'est pas une
-    # boîte, plutôt une bouteille ou une brique, mais rien dans le texte ne le confirme) —
-    # laissé tel quel plutôt que deviné, demandé le 2026-11-09 après un cas réel trouvé sur
-    # DADS Lot 06 Crèmerie (code "BT" qui désignait tantôt une boîte, tantôt une bouteille).
+    return _unite_commande_ardeche(uc_brut)
+
+
+def _unite_commande_ardeche(uc_brut):
+    """Unité de commande FINALE (colonne "UNITE COMMANDE") : reflet direct du code source
+    "UC", seulement traduit vers le vocabulaire canonique (KG->KG, LT->L, UN->UNITÉ — une
+    traduction du MÊME code, pas une supposition) — jamais deviné à partir du texte libre de
+    la Désignation, contrairement au Conditionnement et, dans certains cas, l'Unité de
+    référence (voir _mot_contenant_ardeche). Une éventuelle incohérence entre cette valeur et
+    ce que suggère le Conditionnement (ex: UC="BT" alors que la désignation dit "brique") est
+    désormais du ressort de l'audit (verifie_unite_commande_etendue), pas de la mise en forme
+    — demandé explicitement par l'utilisateur le 2026-11-09 : "recuperemos a coluna UC como
+    ela é"."""
+    base = _base_uc_ardeche(uc_brut)
+    if base == "kg":
+        return "KG"
+    if base == "l":
+        return "L"
+    if base == "un":
+        return "UNITÉ"
     return uc_brut
 
 
@@ -940,9 +998,10 @@ def transforme_ardeche(chemin_source, chemin_sortie, fournisseur, lot):
         prix_commande = _arrondi_prix(prix_brut) if prix_brut is not None else None
         prix_pour_bpu = _arrondi_prix(prix_brut / fact) if prix_brut is not None else None
 
-        unite_cmd = _unite_commande_ardeche(uc_brut, designation)
+        unite_cmd = _unite_commande_ardeche(uc_brut)
+        mot_cond = _mot_contenant_ardeche(uc_brut, designation)
         unite_ref, poids_ou_volume, prix_ref, commentaire_unite, cond_propose = _unite_reference_ardeche(
-            designation, unite_cmd, prix_pour_bpu, cond
+            designation, mot_cond, prix_pour_bpu, cond, _base_uc_ardeche(uc_brut)
         )
         cond_a_ecrire = cond_propose if cond_propose else cond
 

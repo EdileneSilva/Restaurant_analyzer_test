@@ -37,13 +37,13 @@ DOSSIER_REFERENCE = audit_general.DOSSIER_ENTREE
 # Si un de ces nombres change sans raison identifiée après une modification du code, c'est une
 # régression à investiguer — pas à corriger en silence en changeant juste le chiffre ici.
 TOTAUX = {
-    "2026 09 22 Base article groupement 1.xlsx": (183, 809),
-    "2026 09 22 Base article groupement 2.xlsx": (303, 888),
-    "2026 09 22 Base article groupement 3.xlsx": (234, 1034),
-    "2026 09 22 Base article groupement 4.xlsx": (198, 1010),
-    "2026 09 22 Base article groupement 5.xlsx": (219, 896),
-    "2026 09 22 Base article groupement commun.xlsx": (760, 1310),
-    "MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx": (198, 726),
+    "2026 09 22 Base article groupement 1.xlsx": (173, 799),
+    "2026 09 22 Base article groupement 2.xlsx": (293, 878),
+    "2026 09 22 Base article groupement 3.xlsx": (224, 1024),
+    "2026 09 22 Base article groupement 4.xlsx": (191, 1003),
+    "2026 09 22 Base article groupement 5.xlsx": (219, 889),
+    "2026 09 22 Base article groupement commun.xlsx": (748, 1298),
+    "MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx": (193, 721),
 }
 
 

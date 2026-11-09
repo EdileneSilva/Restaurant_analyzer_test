@@ -10,10 +10,17 @@ fichiers audités + les rapports — sans rien écrire sur le serveur, tout se f
 en mémoire.
 """
 
+import base64
+import os
+
 import streamlit as st
 
 import audit_general as audit
 import audit_pipeline
+
+_CHEMIN_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
+with open(_CHEMIN_LOGO, "rb") as _f:
+    _LOGO_BASE64 = base64.b64encode(_f.read()).decode("ascii")
 
 # Les clés de audit_general.TITRES_CATEGORIES_RAPPORT sont les mêmes dans
 # audit_general_commentaires (vérifié), mais PAS tous les libellés : "poids_rempli" y décrit un
@@ -22,7 +29,7 @@ import audit_pipeline
 # voir audit_pipeline.py) — ce libellé est donc recopié tel quel plutôt qu'importé.
 TITRE_POIDS_COMMENTAIRES = "Poids à l'unité de référence — suggestion (rien n'est rempli)"
 
-st.set_page_config(page_title="Audit BPU — démo", page_icon="📋", layout="wide")
+st.set_page_config(page_title="Audit BPU — démo", page_icon=_CHEMIN_LOGO, layout="wide")
 
 # Charte graphique alignée sur ianord.fr (couleurs + police "Inter" relevées sur le site) —
 # complète le thème défini dans .streamlit/config.toml, que Streamlit ne permet pas d'étendre
@@ -66,7 +73,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🧾 Audit de cohérence unités/prix des documents du Marché 🍲")
+st.markdown(
+    f'<h1 style="display:flex; align-items:center; gap:0.6rem;">'
+    f'<img src="data:image/png;base64,{_LOGO_BASE64}" style="height:1em;"> '
+    "Audit de cohérence unités/prix — 🍲 Marché alimentaire</h1>",
+    unsafe_allow_html=True,
+)
 st.caption(
     "Dépose un ou plusieurs fichiers .xlsx : déjà au format canonique "
     "(« Base article groupement N », « MDC_IMPORT_MARCHE »...), ou dans un format "
@@ -137,7 +149,7 @@ if donnees:
 
         for fichier in donnees["fichiers"]:
             st.divider()
-            st.subheader(f"📄 {fichier['nom']}")
+            st.subheader(f"📑 {fichier['nom']}")
 
             if not fichier["resultats"]:
                 st.warning("Aucune feuille reconnue dans ce fichier (format inattendu) — ignoré.")

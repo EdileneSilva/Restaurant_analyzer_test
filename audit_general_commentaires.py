@@ -285,6 +285,13 @@ RE_N_PIECES_DE_QTY = re.compile(
 # divisé par le poids réel du conditionnement) n'était jamais recalculé ni signalé.
 RE_QUANTITE_SEULE = re.compile(rf"^\s*([\d,.]+)\s*({_UNITES_REGEX})\s*$", re.I)
 
+# Conditionnement qui est un nombre NU, sans la moindre unité ni le moindre mot de récipient
+# (ex: '6,000', recopié tel quel de la source quand aucun code/mot n'a permis de l'interpréter
+# — voir _unite_commande_ardeche dans pretraitement_a_formater.py) : un nombre différent de 1
+# ici est un multiplicateur dont personne n'a vérifié s'il affecte déjà le prix — à distinguer
+# de RE_QUANTITE_SEULE ci-dessus (qui, lui, a une unité). Demandé le 2026-11-09.
+RE_NOMBRE_SEUL_SANS_UNITE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*$")
+
 _extraire_quantite_original = motor.extraire_quantite
 
 
@@ -845,7 +852,12 @@ def reconsidere_contenant_texte_libre(resultat, unite_ref, unite_cmd, conditionn
                 valeur = motor._nombre(qty_str)
             except (KeyError, ValueError):
                 continue
-            if valeur > 0 and abs(ratio - valeur) <= motor.TOLERANCE_RATIO * valeur:
+            # valeur == 1 exclue : un ratio de 1 confirmé par un nombre de 1 ne révèle rien
+            # (prix de commande déjà égal au prix de référence, récipient d'une seule unité —
+            # ex: 'BRIQUE DE 1L' avec Prix cmd = Prix réf) — proposer quand même le mot de
+            # récipient ici serait une fausse incohérence, pas une vraie confirmation. Demandé
+            # le 2026-11-09 (vu sur "Lait fermenté ... brique 1 lt").
+            if valeur > 1 and abs(ratio - valeur) <= motor.TOLERANCE_RATIO * valeur:
                 confirme = True
                 break
     elif base_d == "pc":
@@ -853,7 +865,7 @@ def reconsidere_contenant_texte_libre(resultat, unite_ref, unite_cmd, conditionn
         # (unités), 'X20 U' sont tout aussi valables.
         for n_str in RE_NOMBRE_PIECES_LIBRE.findall(conditionnement):
             valeur = int(n_str)
-            if valeur > 0 and abs(ratio - valeur) <= motor.TOLERANCE_RATIO * valeur:
+            if valeur > 1 and abs(ratio - valeur) <= motor.TOLERANCE_RATIO * valeur:
                 confirme = True
                 break
     if not confirme:
@@ -893,6 +905,31 @@ def reconsidere_deja_bonne_unite_officielle(resultat, conditionnement, unite_cmd
         resultat.commentaire_l = None
 
 
+def reconsidere_nombre_sans_unite(resultat, conditionnement):
+    """Conditionnement laissé comme un nombre nu, sans la moindre unité ni le moindre mot de
+    récipient (ex: '6,000', recopié tel quel de la source faute d'avoir pu l'interpréter — voir
+    _unite_commande_ardeche dans pretraitement_a_formater.py) : signale explicitement le nombre
+    lui-même, plutôt que de compter sur la seule incohérence, plus vague, de l'unité de
+    référence/commande pour alerter indirectement — un nombre différent de 1 ici peut être un
+    multiplicateur du prix que personne n'a vérifié. N'écrase pas un signalement déjà posé sur
+    le Conditionnement par une autre règle. Demandé le 2026-11-09."""
+    if getattr(resultat, "flag_conditionnement", None) or not conditionnement:
+        return
+    m = RE_NOMBRE_SEUL_SANS_UNITE.match(conditionnement)
+    if not m:
+        return
+    valeur = motor._nombre(m.group(1))
+    if not valeur or abs(valeur - 1) <= 0.01:
+        return
+    valeur_affichee = int(valeur) if valeur == int(valeur) else round(valeur, 3)
+    resultat.flag_conditionnement = (
+        motor.COULEUR_A_VERIFIER,
+        f"Le conditionnement indique seulement un nombre ({valeur_affichee}), sans unité ni "
+        "récipient reconnu — ce nombre peut être un multiplicateur du prix qui n'a pas été pris "
+        "en compte ; vérifier à la main si le prix de commande/référence en tient déjà compte "
+        "avant de valider.")
+
+
 def traite_ligne_etendue(unite_ref, poids_ref, designation, conditionnement, unite_cmd,
                           prix_ref, prix_cmd, desig_fourn=None):
     """Délègue à _traite_ligne_etendue_nucleo. La correction d'une éventuelle faute de frappe
@@ -908,6 +945,7 @@ def traite_ligne_etendue(unite_ref, poids_ref, designation, conditionnement, uni
     reconsidere_contenant_texte_libre(resultat, unite_ref, unite_cmd, conditionnement,
                                        prix_ref, prix_cmd)
     reconsidere_deja_bonne_unite_officielle(resultat, conditionnement, unite_cmd)
+    reconsidere_nombre_sans_unite(resultat, conditionnement)
 
     # Garde-fou : une couleur posée sans commentaire (oubli dans motor.traite_ligne, ex: la
     # conversion PC -> KG par poids de référence ne renseigne que commentaire_k) rendrait la
@@ -1232,6 +1270,22 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
         info_contenant = determine_base_et_quantite(conditionnement)
         if info_contenant:
             base, quantite, mot = info_contenant
+            # Quand l'unité de commande dit déjà qu'on vend à l'unité individuelle ('UNITÉ',
+            # 'PIECE', 'PC'), le récipient trouvé ici (ex: 'pot') ne groupe pas plusieurs ventes
+            # : le "N" lu dans un texte comme '48 POTS DE 125G' n'est que le nombre de pots
+            # dans le carton, pas un multiplicateur du prix de commande (déjà au pot) —
+            # `quantite` (= N × qté par pot, le seul total que determine_base_et_quantite sait
+            # renvoyer) ne doit alors pas servir de diviseur du prix, seule la qté PAR POT
+            # compte. Retrouve N directement via la même regex qui l'a reconnu (determine_base_
+            # et_quantite ne renvoie que le total, pas N séparément). Demandé le 2026-11-09 (vu
+            # sur "Yaourt ... pot carton (x48) 125 g", qui suggérait à tort de passer le prix de
+            # référence de 3.04€ à 0.0633€, alors que 3.04€ est déjà le bon prix par pot/125g).
+            if mot and motor.normalise_texte(unite_cmd) in ("unite", "unité", "pc", "piece", "pièce"):
+                m_n = motor.RE_CONTENANT_MULTIPLIE.match(conditionnement)
+                if m_n:
+                    n_conteneurs = int(m_n.group(1))
+                    if n_conteneurs > 0:
+                        quantite = quantite / n_conteneurs
             if quantite and quantite > 0:
                 r = motor.Resultat()
 
@@ -1434,6 +1488,20 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                         if abs(motor._nombre(qte_unite) - 1) < 0.01:
                             l_novo = f"LOT DE {int(n_unites)}"
                 l_change = l_novo and motor.normalise_texte(l_novo) != motor.normalise_texte(unite_cmd)
+                # Récipient d'une seule unité de référence (quantité = 1, ex: "SACHET DE 1 KG"
+                # ou "BRIQUE DE 1 L"), ET prix déjà cohérent (pas besoin de k_change), ET unité
+                # de commande déjà identique à l'unité de référence ('KG'='KG', 'L'='L') : rien
+                # à corriger dans aucun sens, que l'unité de commande actuelle soit déjà le nom
+                # du récipient (laissé tel quel) ou encore la seule unité de mesure (pas la peine
+                # de proposer le récipient) — un contenant d'UNE unité ne groupe rien, nommer le
+                # récipient n'apporte aucune information de plus que l'unité de mesure déjà là.
+                # Règle symétrique demandée explicitement le 2026-11-09 ("vale pra os dois
+                # lados"), confirmée après avoir montré le contre-exemple 'SACHET DE 1 KG' (déjà
+                # suggéré dans les fichiers de référence) : la même règle s'applique aux deux,
+                # les totaux de non-régression sont mis à jour en conséquence.
+                if (l_change and not k_change and abs(quantite - 1) < 0.01
+                        and motor.normalise_texte(unite_ref) == motor.normalise_texte(unite_cmd)):
+                    l_change = False
                 l_change_silencieux = False
                 if l_change and mot:
                     # L'unité de commande actuelle est déjà une abréviation reconnue du BON

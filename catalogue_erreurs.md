@@ -573,6 +573,26 @@ régression.
 > le même constat deux fois sur la même cellule (trouvé via `test_sans_doublon_de_commentaire`,
 > qui a immédiatement attrapé le problème).
 
+> **Mise à jour (2026-11-09, encore plus tard le même jour)** : nouvelle règle symétrique
+> (les deux moteurs) — quand l'Unité de référence et l'Unité de commande sont déjà identiques,
+> que le Prix de référence est déjà égal au Prix de commande (rien à recalculer), et que le
+> Conditionnement ne décrit qu'UNE seule unité de référence (ex: "SACHET DE 1 KG" ou "BRIQUE DE
+> 1 L"), la suggestion "l'unité de commande semble plutôt être '<mot du conditionnement>'"
+> n'est plus faite, dans AUCUN sens — un contenant d'une seule unité ne groupe rien, nommer le
+> récipient n'apporte aucune information de plus que l'unité de mesure déjà écrite. Demandée
+> explicitement par l'utilisateur ("vale pra os dois lados"), confirmée après lui avoir montré
+> le cas réel "SACHET DE 1 KG" (groupement 1, lignes 183-191, ex: STEAK HACHE DE BOEUF) comme
+> contre-exemple structurellement identique au cas qu'elle avait signalé ("BRIQUE DE 1 L",
+> vu sur DADS MP ARDECHE 24 Lot 06, "Lait fermenté ... brique 1 lt") : elle a choisi d'appliquer
+> la même règle aux deux, pas de garder un cas en exception. Nouveaux totaux (`audit_general.py`
+> "lignes avec incohérence" / "cellules marquées", même ordre de fichiers) : 173/799, 293/878,
+> 224/1024, 191/1003, 219/889, 748/1298, 193/721 — baisse partout sauf groupement 5 (inchangé,
+> aucune ligne concernée). `audit_general_commentaires.py` (cellules marquées seulement) :
+> 756, 827, 987, 955, 864, 955, 744. Vérifié que les lignes qui perdent leur signalement sont
+> bien toutes des cas "contenant d'1 seule unité, prix déjà cohérent" (ex: groupement 1
+> lignes 183-191, "SACHET DE 1 KG" avec Unité de commande déjà 'KG' et Prix identique des deux
+> côtés) — pas un effet de bord sur un autre cas.
+
 > Historique : les totaux de cellules marquées de groupement 1 et 2 sont passés de 247→255
 > et 419→427 le 2026-10-15, suite à l'ajout de la règle n°10 ci-dessus (contenant à double
 > imbrication, 8 lignes concernées, +1 cellule par ligne pour la nouvelle colonne "Nombre de

@@ -24,13 +24,13 @@ import audit_general_commentaires as audit
 DOSSIER_REFERENCE = audit.DOSSIER_ENTREE
 
 TOTAUX_CELLULES = {
-    "2026 09 22 Base article groupement 1.xlsx": 766,
-    "2026 09 22 Base article groupement 2.xlsx": 837,
-    "2026 09 22 Base article groupement 3.xlsx": 997,
-    "2026 09 22 Base article groupement 4.xlsx": 962,
-    "2026 09 22 Base article groupement 5.xlsx": 871,
-    "2026 09 22 Base article groupement commun.xlsx": 967,
-    "MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx": 749,
+    "2026 09 22 Base article groupement 1.xlsx": 756,
+    "2026 09 22 Base article groupement 2.xlsx": 827,
+    "2026 09 22 Base article groupement 3.xlsx": 987,
+    "2026 09 22 Base article groupement 4.xlsx": 955,
+    "2026 09 22 Base article groupement 5.xlsx": 864,
+    "2026 09 22 Base article groupement commun.xlsx": 955,
+    "MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx": 744,
 }
 
 
