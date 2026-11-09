@@ -66,7 +66,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("📋 Audit de cohérence unités/prix")
+st.title("🧾 Audit de cohérence unités/prix des documents du Marché 🍲")
 st.caption(
     "Dépose un ou plusieurs fichiers .xlsx : déjà au format canonique "
     "(« Base article groupement N », « MDC_IMPORT_MARCHE »...), ou dans un format "
@@ -165,48 +165,67 @@ if donnees:
                     colonnes[2].metric("Lignes à supprimer (en rouge)", lignes_a_supprimer)
                     colonnes[3].metric("Références en double (à comparer)", stats["copies_possibles"])
 
-                    # Marché/Lot (comble_marche_lot) : pas dans TITRES_CATEGORIES_RAPPORT, donc
-                    # pas de détail ligne par ligne possible (pas de commentaire posé, juste une
-                    # couleur) — affiché en légende plutôt qu'en repli déroulant.
-                    st.caption(
-                        f"Marché/Lot recopiés automatiquement (lignes voisines identiques) : "
-                        f"{stats['marche_lot_rempli']} · à confirmer manuellement (surlignés) : "
-                        f"{stats['marche_lot_signale']}"
-                    )
-
-                    # Doublons Lot/Fournisseur dus à un espace en trop ou une casse différente :
-                    # déjà corrigés automatiquement par corrige_doublons_texte (audit_general*.py)
-                    # avant d'arriver ici — affiché en légende, comme Marché/Lot ci-dessus. Le cas
-                    # "même description, numéro de Lot différent" n'est lui que signalé (jamais
-                    # corrigé seul), dans un repli déroulant séparé.
+                    # Regroupées dans un seul repli compact (fermé par défaut) : Marché/Lot
+                    # (comble_marche_lot, pas de détail ligne par ligne possible — pas de
+                    # commentaire posé, juste une couleur) et les doublons Lot/Fournisseur
+                    # (espace/casse, corrige_doublons_texte) — ce sont deux corrections déjà
+                    # faites automatiquement, pas des points à vérifier en priorité. Avant,
+                    # ces infos étaient toujours affichées en clair, ce qui noyait les vraies
+                    # catégories à vérifier sous des lignes techniques — simplifié le
+                    # 2026-11-09 à la demande de l'utilisateur ("trop d'info technique").
                     avertissements_lot = stats["doublons_texte_a_verifier"]
-                    st.caption(
-                        f"Doublons Lot/Fournisseur (espace ou casse) corrigés automatiquement : "
-                        f"{stats['doublons_texte_corriges']}"
-                        + ("" if avertissements_lot else " · rien d'autre à vérifier.")
-                    )
+                    titre_corrections = "🔧 Corrections automatiques (Marché/Lot, Lot/Fournisseur)"
                     if avertissements_lot:
-                        with st.expander(
-                            f"⚠️ Lots à vérifier manuellement (même description, numéro "
-                            f"différent) ({len(avertissements_lot)})"
-                        ):
+                        titre_corrections += " — ⚠️ 1 point à vérifier"
+                    with st.expander(titre_corrections):
+                        st.caption(
+                            f"Marché/Lot recopiés automatiquement (lignes voisines identiques) : "
+                            f"{stats['marche_lot_rempli']} · à confirmer manuellement "
+                            f"(surlignés) : {stats['marche_lot_signale']}"
+                        )
+                        st.caption(
+                            "Doublons Lot/Fournisseur (espace ou casse) corrigés "
+                            f"automatiquement : {stats['doublons_texte_corriges']}"
+                        )
+                        if avertissements_lot:
+                            st.markdown(
+                                "**⚠️ Lots à vérifier manuellement** (même description, "
+                                "numéro différent — possible ligne glissée) :"
+                            )
                             for message in avertissements_lot:
                                 st.markdown(f"- {message}")
 
-                    # Juste les titres + compteurs par défaut ; les détails (ligne par ligne,
-                    # avec le commentaire) ne s'affichent que si on clique pour les ouvrir.
+                    # Catégories avec quelque chose à signaler : mises en avant, chacune dans
+                    # son propre repli. Catégories vides : juste comptées dans un repli à part,
+                    # pour ne pas allonger la page avec des lignes "(0)" à chaque fois.
                     titres_categories = dict(audit.TITRES_CATEGORIES_RAPPORT)
                     if mode == "commentaires":
                         titres_categories["poids_rempli"] = TITRE_POIDS_COMMENTAIRES
+                    categories_a_verifier = []
+                    categories_vides = []
                     for cle, titre in titres_categories.items():
                         elements = resultat["categories"][cle]
-                        if not elements:
-                            st.caption(f"{titre} (0)")
-                            continue
-                        with st.expander(f"{titre} ({len(elements)})"):
-                            for ligne, designation, texte in elements:
-                                desig_courte = (designation or "").strip()
-                                st.markdown(f"**Ligne {ligne}** — {desig_courte}  \n{texte}")
+                        if elements:
+                            categories_a_verifier.append((titre, elements))
+                        else:
+                            categories_vides.append(titre)
+
+                    if categories_a_verifier:
+                        st.markdown("**Points à vérifier**")
+                        for titre, elements in categories_a_verifier:
+                            with st.expander(f"{titre} ({len(elements)})"):
+                                for ligne, designation, texte in elements:
+                                    desig_courte = (designation or "").strip()
+                                    st.markdown(f"**Ligne {ligne}** — {desig_courte}  \n{texte}")
+                    else:
+                        st.success("Rien à vérifier dans les autres catégories.")
+
+                    if categories_vides:
+                        with st.expander(
+                            f"Catégories sans rien à signaler ({len(categories_vides)})"
+                        ):
+                            for titre in categories_vides:
+                                st.caption(f"✅ {titre}")
 
             nom_base = fichier["nom"].rsplit(".", 1)[0]
             col_transforme, col_audit = st.columns(2)

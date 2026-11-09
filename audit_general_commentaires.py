@@ -2325,6 +2325,46 @@ def applique_defaut_legume(resultat, lot_valor, designation, conditionnement, un
         f"'{nouveau_l}'. À confirmer.")
 
 
+def verifie_coherence_unite_prix_identiques(resultat, unite_ref, unite_cmd, prix_ref, prix_cmd,
+                                             conditionnement):
+    """Règle simple et TOUJOURS vérifiée, même quand le Conditionnement semble expliquer
+    mathématiquement un écart : si l'Unité de référence et l'Unité de commande FINALES (après
+    toute correction automatique déjà décidée par le reste du moteur) sont le même texte, les
+    deux prix doivent être égaux. Les laisser différents alors que l'unité affichée est
+    identique est trompeur (ex: 'L' des deux côtés alors que le prix de commande couvre en
+    fait un seau de 10L) — même si le Conditionnement justifie le facteur, l'étiquette d'unité
+    elle-même devrait alors être plus précise ('SEAU', pas juste 'L'), donc ça reste à
+    signaler. Demandé explicitement par l'utilisateur le 2026-11-09 : contrairement au reste
+    du moteur, qui accepte silencieusement un écart expliqué par le Conditionnement, cette
+    règle-ci ne connaît pas d'exception. Renvoie le message si incohérence, sinon None.
+
+    Si resultat.couleur_m est déjà posé, le reste du moteur a déjà détecté et va déjà signaler
+    ce même cas (même unité des deux côtés, ratio ≠ 1, rien dans le conditionnement ne
+    l'explique) : ne rien ajouter, pour ne pas dupliquer le même constat sur la même cellule."""
+    if resultat is not None and resultat.couleur_m is not None:
+        return None
+    if prix_ref is None or prix_cmd is None:
+        return None
+    d_final = (resultat.nouveau_d if resultat is not None and resultat.nouveau_d is not None
+               else unite_ref)
+    l_final = (resultat.nouveau_l if resultat is not None and resultat.nouveau_l is not None
+               else unite_cmd)
+    if not d_final or not l_final:
+        return None
+    if motor.normalise_texte(d_final) != motor.normalise_texte(l_final):
+        return None  # unités différentes : cette règle ne s'applique pas
+    k_final = (resultat.nouveau_k if resultat is not None and resultat.nouveau_k is not None
+               else prix_ref)
+    if abs(k_final - prix_cmd) <= 0.005:
+        return None
+    return (
+        f"Unité de référence et Unité de commande identiques ('{l_final}'), donc les deux prix "
+        f"devraient être égaux — mais Prix de référence ({k_final}) ≠ Prix de commande "
+        f"({prix_cmd}). Vérifiez le prix, ou si l'Unité de commande devrait plutôt nommer le "
+        f"conditionnement réel ('{conditionnement}')."
+    )
+
+
 def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref, fournisseur,
                         col_poids_ref, lot_valor=None, indice_prix=None, col_nb_pieces=None):
     conditionnement = ws_valeurs.cell(row=ligne, column=fournisseur["cond"]).value
@@ -2707,6 +2747,13 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                f"Plusieurs références semblent présentes dans cette cellule ('{reference}'). "
                "Vérifiez laquelle est la bonne, ou s'il s'agit de plusieurs produits "
                "différents, séparez-les en une ligne par article/référence.")
+        total += 1
+
+    message_unite_prix = verifie_coherence_unite_prix_identiques(
+        resultat, unite_ref, unite_cmd, prix_ref, prix_cmd, conditionnement)
+    if message_unite_prix:
+        marque(ws.cell(row=ligne, column=fournisseur["prix_cmd"]), motor.COULEUR_RATIO_SUSPECT,
+               fournisseur["nom"], message_unite_prix)
         total += 1
 
     return total

@@ -464,7 +464,11 @@ def transforme_passion_froid(chemin_source, chemin_sortie):
         lignes.append(pg._ligne_vide_de_base(
             fournisseur="Passion Froid", lot=gamme, designation=designation, unite_ref=unite_ref,
             poids=poids_kg, commentaire_unite=commentaire_unite, cond=cond_a_ecrire,
-            desig_fourn=designation, ref=reference, prix_ref=prix, unite_cmd=unite_cmd,
+            # Désignation fournisseur laissée vide : la source n'a qu'une seule colonne de
+            # désignation ("Libellé"), pas de colonne fournisseur distincte — la dupliquer
+            # aurait juste répété la même valeur dans les deux colonnes, sans info en plus.
+            # Demandé par l'utilisateur le 2026-11-09.
+            desig_fourn=None, ref=reference, prix_ref=prix, unite_cmd=unite_cmd,
             prix_cmd=prix_cmd, local=None, bio=None, label=None, origine=None,
             commentaire_origine=None, marche=None,
         ))
@@ -724,6 +728,14 @@ def _texte_conditionnement(n, quantite_texte, conteneur):
     où `n` ET `conteneur` sont établis autrement (REGAL) ; ici les deux sont déjà connus avec
     certitude, donc assemblés directement, même logique de rendu qu'elle ("CONTENANT DE N X
     QTE", ou juste la quantité si n=1 et pas de contenant)."""
+    if conteneur == "PIECE" and n > 1:
+        # "PIECE" décrit une pièce individuelle : au pluriel avec un multiplicateur, "PIECE DE
+        # N X qté" se lit à tort comme "une pièce de N×qté" plutôt que "N pièces de qté
+        # chacune" — et ce texte, repris tel quel par l'audit (qui cherche des motifs "N X
+        # qté" dans le Conditionnement pour vérifier le prix), créait un faux signalement
+        # d'incohérence. Corrigé en mettant le nombre avant et "PIECE" au pluriel ("N PIECES
+        # DE qté"), qui ne matche plus ce motif — trouvé et demandé le 2026-11-09.
+        return f"{n} PIECES DE {quantite_texte}"
     if conteneur:
         return f"{conteneur} DE {n} X {quantite_texte}" if n > 1 else f"{conteneur} DE {quantite_texte}"
     return f"{n} X {quantite_texte}" if n > 1 else quantite_texte
@@ -813,6 +825,14 @@ def _unite_commande_ardeche(uc_brut, designation):
         return "KG"
     if norm == "lt":
         return "L"
+    if norm == "un":
+        # "UN" est déjà un code sans ambiguïté (une pièce) : ne pas le laisser écraser par un
+        # mot de contenant trouvé dans la désignation (ex: "Yaourt ... pot carton (x48) 125 g",
+        # Cond=48 — le mot "pot" décrit l'emballage INDIVIDUEL de la pièce elle-même, pas un
+        # contenant vendu à part ; le prendre pour l'unité de commande multipliait le poids par
+        # 48 à tort, donnant un prix au kg 48 fois trop bas. Trouvé le 2026-11-09 sur DADS
+        # Lot 06 Crèmerie.) Contrairement à "BT", "UN" n'a qu'un seul sens possible.
+        return "PIECE"
     m = RE_ARDECHE_BOITE.search(str(designation or ""))
     if m:
         return f"BOITE {m.group(1).replace(' ', '')}"
@@ -820,7 +840,12 @@ def _unite_commande_ardeche(uc_brut, designation):
     if m:
         mot = pt._normalise(m.group(1))
         return "BOITE" if mot in ("bt", "bte", "boite") else mot.upper()
-    return {"un": "PIECE", "bt": "BOITE"}.get(norm, uc_brut)
+    # "BT" sans aucun indice dans la désignation (ni mot de contenant, ni code boîte en N/M) :
+    # pas de défaut fiable à deviner (ex: "Lait ... UHT BIO" — un "BT" de lait n'est pas une
+    # boîte, plutôt une bouteille ou une brique, mais rien dans le texte ne le confirme) —
+    # laissé tel quel plutôt que deviné, demandé le 2026-11-09 après un cas réel trouvé sur
+    # DADS Lot 06 Crèmerie (code "BT" qui désignait tantôt une boîte, tantôt une bouteille).
+    return uc_brut
 
 
 # REGIONS_LOCALES_ARDECHE : voir sa définition à côté de REGIONS_FRANCE plus haut dans ce
@@ -898,19 +923,26 @@ def transforme_ardeche(chemin_source, chemin_sortie, fournisseur, lot):
         origine_mp_brute = ws.cell(row=r, column=COL_ARDECHE_ORIGINE_MP).value
         cond = ws.cell(row=r, column=COL_ARDECHE_COND).value
         uc_brut = ws.cell(row=r, column=COL_ARDECHE_UC).value
-        # Prix de commande = "Prix" ÷ "Fact." (recalculé nous-mêmes plutôt que de lire "PU",
-        # qui porte pourtant la même valeur déjà précalculée côté source) : "Fact." n'est PAS
-        # toujours 1 (vérifié sur les 12 fichiers MP ARDECHE 24 : va de 0,04 à 200 selon le
-        # fichier), donc s'appuyer sur "Prix"/"Fact." directement est plus robuste qu'une
-        # colonne dérivée dont on ne contrôle pas le calcul — décidé avec l'utilisateur le
-        # 2026-11-09, suite à un retour du métier sur le mapping de colonnes de ce fichier.
+        # Prix de commande = "Prix" tel quel (recopié de la source, sans division) : si le
+        # Conditionnement dit "10 L", le prix doit refléter ces 10 L, pas un prix ramené à 1 L
+        # — l'incohérence entre Unité de commande (ex: "L" alors que le prix couvre tout le
+        # Conditionnement) est volontairement laissée telle quelle ici, à corriger plus tard
+        # côté audit, pas à la formatage (décidé avec l'utilisateur le 2026-11-09, après un
+        # premier essai en Prix ÷ Fact. qui ne correspondait plus à la colonne "Prix" source).
+        #
+        # Prix de référence (BPU, par KG/L/PC), lui, reste calculé à partir de "Prix" ÷
+        # "Fact." (pas "Prix" seul) : "Fact." n'est PAS toujours 1 (vérifié sur les 12 fichiers
+        # MP ARDECHE 24 : va de 0,04 à 200 selon le fichier) — sans cette division, le Prix de
+        # référence serait faux d'un facteur "Fact." à chaque fois qu'il diffère de 1 (ex: ce
+        # même exemple, Cond.=10L/Fact.=10 : prix au litre réel = 65,4€ ÷ 10 = 6,54€, pas 65,4€).
         prix_brut = _nombre_ardeche(ws.cell(row=r, column=COL_ARDECHE_PRIX).value)
         fact = _nombre_ardeche(ws.cell(row=r, column=COL_ARDECHE_FACT).value) or 1
-        prix_commande = _arrondi_prix(prix_brut / fact) if prix_brut is not None else None
+        prix_commande = _arrondi_prix(prix_brut) if prix_brut is not None else None
+        prix_pour_bpu = _arrondi_prix(prix_brut / fact) if prix_brut is not None else None
 
         unite_cmd = _unite_commande_ardeche(uc_brut, designation)
         unite_ref, poids_ou_volume, prix_ref, commentaire_unite, cond_propose = _unite_reference_ardeche(
-            designation, unite_cmd, prix_commande, cond
+            designation, unite_cmd, prix_pour_bpu, cond
         )
         cond_a_ecrire = cond_propose if cond_propose else cond
 
@@ -926,7 +958,12 @@ def transforme_ardeche(chemin_source, chemin_sortie, fournisseur, lot):
         lignes.append(pg._ligne_vide_de_base(
             fournisseur=fournisseur, lot=lot, designation=designation, unite_ref=unite_ref,
             poids=poids_ou_volume, commentaire_unite=commentaire_unite, cond=cond_a_ecrire,
-            desig_fourn=designation, ref=reference, prix_ref=prix_ref, unite_cmd=unite_cmd,
+            # Désignation fournisseur laissée vide : la source n'a qu'une seule colonne de
+            # désignation ("Nom technique"), pas de colonne fournisseur distincte — la
+            # dupliquer aurait juste répété la même valeur dans les deux colonnes, sans info en
+            # plus. Demandé par l'utilisateur le 2026-11-09 (remarqué sur DADS/Passion Froid MP
+            # ARDECHE 24, mais s'applique aux 12 fichiers de cette famille).
+            desig_fourn=None, ref=reference, prix_ref=prix_ref, unite_cmd=unite_cmd,
             prix_cmd=prix_commande, local=local_x, bio=bio_x, label=label, origine=valeur_origine,
             commentaire_origine=commentaire_origine, marche=None,
         ))

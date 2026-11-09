@@ -515,7 +515,7 @@ groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables, 
 | Base article groupement 4 | 198 | 1010 |
 | Base article groupement 5 | 219 | 896 |
 | Base article groupement commun | 760 | 1310 |
-| MDC_IMPORT_MARCHE | 194 | 720 |
+| MDC_IMPORT_MARCHE | 198 | 740 |
 
 Ces chiffres (`audit_general.py`, sortie dans `transformed_files/`) servent de résultat attendu
 pour TT-09 (tests de non-régression) : si une future modification du code change ces totaux
@@ -555,6 +555,23 @@ régression.
 > attendue : tous les totaux de cellules montent, puisque bien plus de lignes ont ces deux
 > champs vides par construction (ex: BPUR FRESCA, qui n'a jamais d'Unité de commande). Nouveaux
 > totaux, même ordre de fichiers : 766 / 837 / 997 / 962 / 871 / 967 / 743.
+
+> **Mise à jour (2026-11-09, plus tard le même jour)** : nouvelle règle
+> `verifie_coherence_unite_prix_identiques` (les deux moteurs), demandée explicitement par
+> l'utilisateur : quand l'Unité de référence et l'Unité de commande finales sont le même
+> texte, les deux prix DOIVENT être égaux — signalé systématiquement, même quand le
+> Conditionnement semble expliquer mathématiquement l'écart (contrairement au reste du moteur,
+> qui acceptait ce cas en silence). N'affecte que "MDC_IMPORT_MARCHE" parmi les 7 fichiers de
+> référence : 194→198 lignes et 720→726 cellules (`audit_general.py`), 743→749 cellules
+> (`audit_general_commentaires.py`). Les 6 autres fichiers restent strictement identiques.
+> Vérifié ligne par ligne : les nouvelles lignes signalées sont de vrais cas où Prix de
+> référence ≠ Prix de commande malgré une unité identique (ex: ligne 163 "pâté de foie
+> supérieur", KG des deux côtés, 0,6667€ contre 0,95€). Garde-fou ajouté dans la même règle :
+> si `resultat.couleur_m` est déjà posé (le moteur partagé a déjà détecté ce même cas via son
+> propre canal "même unité, ratio ≠ 1, rien ne l'explique" — ex: lignes 244-259, calibres
+> approximatifs comme "100g et plus"), la nouvelle règle ne rajoute rien, pour ne pas dupliquer
+> le même constat deux fois sur la même cellule (trouvé via `test_sans_doublon_de_commentaire`,
+> qui a immédiatement attrapé le problème).
 
 > Historique : les totaux de cellules marquées de groupement 1 et 2 sont passés de 247→255
 > et 419→427 le 2026-10-15, suite à l'ajout de la règle n°10 ci-dessus (contenant à double
