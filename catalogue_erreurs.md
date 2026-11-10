@@ -522,6 +522,23 @@ nouvelle règle ne rajoute rien, pour ne pas signaler deux fois la même cellule
 référence — exemple réel : ligne 163 "pâté de foie supérieur", KG des deux côtés, 0,6667€
 contre 0,95€.
 
+**Bug corrigé (2026-11-10)** : la comparaison utilisait `resultat.nouveau_k` (une simple
+SUGGESTION de recalcul, jamais écrite dans la cellule — voir règle n°22, "le prix de référence
+n'est JAMAIS écrit automatiquement") à la place du Prix de référence RÉEL, ce qui pouvait
+produire un message contradictoire : "les deux prix devraient être égaux... mais Prix de
+référence (0.225) ≠ Prix de commande (2.25)" alors que le Prix de référence RÉEL affiché dans
+la cellule valait en fait aussi 2.25€ (donc déjà égal). Trouvé par l'utilisateur en testant le
+fichier Vivalya MP ARDECHE 24 (ligne 92, "Pomme de terre crue épluchée cube... 5 kg", Unité de
+référence = Unité de commande = 'KG', Prix de référence = Prix de commande = 2,25€,
+Conditionnement = "10KG"). Corrigé en séparant deux cas : (1) les prix RÉELS diffèrent → message
+d'origine, avec les vraies valeurs ; (2) les prix réels sont déjà égaux, mais une suggestion de
+recalcul (`nouveau_k`) existe quand même, parce que le Conditionnement indique une quantité
+réelle différente de 1 (ex: "10KG") → nouveau message, qui ne prétend plus que les prix
+diffèrent : "cette relation est correcte. Mais le Conditionnement... indique en fait une
+quantité différente de 1... vérifiez si l'Unité de commande et/ou le Prix de commande
+reflètent bien tout le conditionnement, ou seulement une partie." Aucun changement de total
+(même cellule marquée avant/après, seul le texte était faux).
+
 ### 43. Conditionnement réduit à un nombre nu, sans unité ni récipient (`reconsidere_nombre_sans_unite`)
 
 Un Conditionnement recopié tel quel depuis la source quand aucun code/mot n'a permis de

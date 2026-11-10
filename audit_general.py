@@ -2445,16 +2445,40 @@ def verifie_coherence_unite_prix_identiques(resultat, unite_ref, unite_cmd, prix
         return None
     if motor.normalise_texte(d_final) != motor.normalise_texte(l_final):
         return None  # unités différentes : cette règle ne s'applique pas
-    k_final = (resultat.nouveau_k if resultat is not None and resultat.nouveau_k is not None
-               else prix_ref)
-    if abs(k_final - prix_cmd) <= 0.005:
-        return None
-    return (
-        f"Unité de référence et Unité de commande identiques ('{l_final}'), donc les deux prix "
-        f"devraient être égaux — mais Prix de référence ({k_final}) ≠ Prix de commande "
-        f"({prix_cmd}). Vérifiez le prix, ou si l'Unité de commande devrait plutôt nommer le "
-        f"conditionnement réel ('{conditionnement}')."
-    )
+
+    if abs(prix_ref - prix_cmd) > 0.005:
+        # Cas d'origine de la règle : les prix RÉELS (pas une suggestion) diffèrent alors que
+        # l'unité affichée est identique des deux côtés.
+        return (
+            f"Unité de référence et Unité de commande identiques ('{l_final}'), donc les deux "
+            f"prix devraient être égaux — mais Prix de référence ({prix_ref}) ≠ Prix de "
+            f"commande ({prix_cmd}). Vérifiez le prix, ou si l'Unité de commande devrait plutôt "
+            f"nommer le conditionnement réel ('{conditionnement}')."
+        )
+
+    # Les prix RÉELS sont déjà égaux ici (sinon le cas ci-dessus aurait déjà renvoyé un
+    # message) : la règle de base ("même unité -> même prix") est respectée. Mais si une autre
+    # règle a par ailleurs calculé un prix de référence suggéré différent (nouveau_k) à partir
+    # du Conditionnement, c'est que ce dernier décrit une quantité réelle différente de 1 (ex:
+    # Conditionnement "10KG" avec Unité de référence ET de commande déjà 'KG' toutes les deux à
+    # 2.25€) : la relation prix/unité affichée est cohérente EN APPARENCE, mais recopier le même
+    # prix sur les deux colonnes alors que le Conditionnement dit qu'il y a 10 kg dedans reste
+    # suspect — à vérifier différemment du cas ci-dessus : ne JAMAIS prétendre que les prix
+    # diffèrent alors qu'ils sont identiques (bug trouvé le 2026-11-10 en testant Vivalya, ligne
+    # 92 : le message disait "Prix de référence (0.225) ≠ Prix de commande (2.25)" en utilisant
+    # la suggestion nouveau_k à la place du prix de référence réel, qui valait en fait aussi
+    # 2.25 — contradictoire et faux).
+    if (resultat is not None and resultat.nouveau_k is not None
+            and abs(resultat.nouveau_k - prix_cmd) > 0.005):
+        return (
+            f"Unité de référence et Unité de commande identiques ('{l_final}'), et Prix de "
+            f"référence = Prix de commande ({prix_cmd}) — cette relation est correcte. Mais le "
+            f"Conditionnement ('{conditionnement}') indique en fait une quantité différente de "
+            f"1, ce qui suggère plutôt un prix de référence proche de "
+            f"{round(resultat.nouveau_k, 4)}€ : vérifiez si l'Unité de commande et/ou le Prix de "
+            "commande reflètent bien tout le conditionnement, ou seulement une partie."
+        )
+    return None
 
 
 def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref, fournisseur,
