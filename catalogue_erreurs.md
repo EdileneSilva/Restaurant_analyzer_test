@@ -582,6 +582,20 @@ Lot 06) : la même règle s'applique aux deux, pas de garder un cas en exception
 quantité ≠ 1 (ex: "SEAU DE 10 L"), la suggestion continue d'apparaître normalement — voir les
 totaux de non-régression mis à jour ci-dessous.
 
+### 46. Prix à 0€ : alarme dédiée, et analyse de cohérence unité/prix désactivée pour la ligne
+
+Un Prix de référence ou un Prix de commande valant exactement 0€ est désormais signalé
+explicitement sur sa propre cellule ("Un prix de 0€ est impossible pour un article réellement
+vendu — vérifier la saisie..."), au lieu de passer inaperçu ou de produire un signalement
+inadapté (un ratio/calcul de prix basé sur une division par 0 n'a aucun sens). Quand l'un des
+deux prix vaut 0, toute la suite de l'analyse de cohérence unité/prix pour cette ligne
+(`traite_ligne_etendue`, `verifie_coherence_unite_prix_identiques`, etc.) est sautée : demandé
+explicitement par l'utilisateur, qui a jugé que "não fará muito sentido" de comparer des
+unités/prix quand le prix de départ est déjà 0. Trouvé sur le fichier Vivalya MP ARDECHE 24
+(beaucoup de lignes à "0,000 €" côté source, probablement des prix non communiqués par le
+fournisseur plutôt que des cases vides) — n'affecte aucun des 7 fichiers de référence (aucun
+prix à 0€ exact dedans), donc aucun total de non-régression à mettre à jour.
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article

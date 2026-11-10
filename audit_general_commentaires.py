@@ -2541,8 +2541,31 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                                 end_color=motor.COULEUR_A_VERIFIER, fill_type="solid")
         total += 1
 
+    # Prix à 0€ : impossible pour un article réellement vendu (presque toujours une donnée
+    # manquante côté fournisseur, pas un vrai prix nul) — signalé explicitement sur sa propre
+    # cellule. N'a pas de sens de pousser plus loin l'analyse de cohérence unité/prix sur cette
+    # ligne (tous les ratios/calculs qui suivent sont basés sur une division par le prix, qui
+    # perd tout son sens à 0 — ex: "le prix de référence devrait être X€" n'importe quoi quand
+    # le prix de départ est déjà 0) : demandé explicitement par l'utilisateur le 2026-11-10,
+    # après l'avoir vu sur de nombreuses lignes du fichier Vivalya MP ARDECHE 24 (prix non
+    # communiqués par le fournisseur, visiblement, mais recopiés tels quels comme "0,000 €" par
+    # pretraitement_a_formater.py plutôt que laissés vides).
+    prix_zero = (prix_ref == 0) or (prix_cmd == 0)
+    if prix_ref == 0:
+        marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]), motor.COULEUR_A_VERIFIER,
+               fournisseur["nom"],
+               "Un prix de 0€ est impossible pour un article réellement vendu — vérifier la "
+               "saisie (prix non communiqué par le fournisseur, ou erreur d'export).")
+        total += 1
+    if prix_cmd == 0:
+        marque(ws.cell(row=ligne, column=fournisseur["prix_cmd"]), motor.COULEUR_A_VERIFIER,
+               fournisseur["nom"],
+               "Un prix de 0€ est impossible pour un article réellement vendu — vérifier la "
+               "saisie (prix non communiqué par le fournisseur, ou erreur d'export).")
+        total += 1
+
     resultat = None
-    if unite_ref and prix_ref is not None and prix_cmd is not None:
+    if unite_ref and prix_ref is not None and prix_cmd is not None and not prix_zero:
         resultat = traite_ligne_etendue(unite_ref, poids_ref, designation, conditionnement,
                                          unite_cmd, prix_ref, prix_cmd, desig_fourn)
 
