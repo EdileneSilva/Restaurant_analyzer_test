@@ -3870,19 +3870,31 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
             if resultat_texte and resultat_texte[0] in ("kg", "l", "litre"):
                 quantite_texte = round(resultat_texte[1], 3)
                 cel_poids.value = quantite_texte
-                cel_poids.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
-                                              end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
-                cel_poids.comment = Comment(
-                    f"Poids à l'unité de référence interprété à partir du texte d'origine "
-                    f"('{poids_ref}') : {quantite_texte}.", AUTEUR_COMMENTAIRE)
+                # Pur changement d'écriture (ex: '475 g' -> 0.475), aucun récipient/structure
+                # en jeu (resultat_texte[2] est None ici) : rien n'est VRAIMENT décidé, juste
+                # une unité convertie — comme les autres uniformisations purement mécaniques du
+                # fichier (pièce -> PC, casse...), reste silencieux (pas de couleur, pas de
+                # commentaire, pas compté comme "une ligne à problème"). Un vrai récipient
+                # trouvé (ex: 'seau de 5 kg', resultat_texte[2] = 'seau') reste signalé : c'est
+                # une interprétation, pas une simple conversion d'unité. Demandé par
+                # l'utilisateur le 2026-11-10, vu sur Base IANOR AGAPE 16 Epicerie, lignes 85-86
+                # ('475 g'/'550 g').
+                if resultat_texte[2] is not None:
+                    cel_poids.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
+                                                  end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
+                    cel_poids.comment = Comment(
+                        f"Poids à l'unité de référence interprété à partir du texte d'origine "
+                        f"('{poids_ref}') : {quantite_texte}.", AUTEUR_COMMENTAIRE)
+                    stats["marques"] += 1
+                    poids_texte_marque = True
                 poids_ref = quantite_texte
             else:
                 marque(cel_poids, motor.COULEUR_A_VERIFIER, None,
                        f"Poids à l'unité de référence ('{poids_ref}') est du texte, pas un "
                        "nombre, et n'a pas pu être interprété automatiquement — à convertir "
                        "manuellement en kg/L.")
-            stats["marques"] += 1
-            poids_texte_marque = True
+                stats["marques"] += 1
+                poids_texte_marque = True
 
         if not unite_ref:
             base_deduite, details = derive_unite_ref_vide(ws_valeurs, ligne, fournisseurs)

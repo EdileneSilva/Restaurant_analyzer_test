@@ -730,6 +730,28 @@ parfois vu aussi), sans avoir à dupliquer le motif pour chaque variante d'accen
 Aucun changement de total de non-régression sur les 7 fichiers de référence (aucun n'a cet
 accent sur ce mot précis).
 
+### 51. "Poids à l'unité de référence" en texte libre : silencieux quand c'est une simple conversion d'unité (`audit_general.py` seulement)
+
+Un "Poids à l'unité de référence" écrit en texte libre (ex: "475 g") était systématiquement
+signalé (couleur + commentaire "interprété à partir du texte d'origine"), même quand
+`determine_base_et_quantite` ne reconnaît ici qu'un NOMBRE NU avec son unité (aucun récipient,
+3e élément du résultat = `None`) — un pur changement d'écriture ("475 g" -> 0.475), rien de
+réellement décidé ou deviné. Désormais silencieux dans ce cas précis (comme les autres
+uniformisations purement mécaniques déjà silencieuses ailleurs — pièce -> PC, casse...) : la
+valeur est quand même écrite dans la cellule, mais sans couleur, sans commentaire, et sans
+compter la ligne comme "à problème". Un vrai récipient trouvé dans le texte (ex: "seau de
+5 kg", 3e élément = "seau") reste signalé normalement : c'est une interprétation à vérifier,
+pas une simple conversion d'unité. Demandé par l'utilisateur le 2026-11-10, vu sur Base IANOR
+AGAPE 16 Epicerie, lignes 85-86 ("475 g"/"550 g").
+
+Appliqué SEULEMENT à `audit_general.py` : dans `audit_general_commentaires.py`, la valeur
+n'est jamais écrite dans la cellule (ce moteur ne corrige jamais, il commente seulement) — le
+commentaire y est le SEUL signal que le texte a été compris, donc le retirer ferait disparaître
+toute trace de la conversion (la cellule resterait "475 g" sans aucune indication). Décidé avec
+l'utilisateur après lui avoir signalé cette asymétrie : le silence ne s'applique qu'une fois la
+correction réellement appliquée ailleurs. Aucun changement de total de non-régression sur les 7
+fichiers de référence.
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
