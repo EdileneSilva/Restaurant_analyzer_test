@@ -42,7 +42,7 @@ TOTAUX = {
     "2026 09 22 Base article groupement 3.xlsx": (224, 1024),
     "2026 09 22 Base article groupement 4.xlsx": (191, 1003),
     "2026 09 22 Base article groupement 5.xlsx": (219, 889),
-    "2026 09 22 Base article groupement commun.xlsx": (748, 1298),
+    "2026 09 22 Base article groupement commun.xlsx": (748, 1299),
     "MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx": (193, 721),
 }
 

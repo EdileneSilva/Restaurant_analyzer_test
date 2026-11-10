@@ -667,6 +667,51 @@ boîte/carton comme toujours équivalents à "pc" ; seulement selon le nombre ad
 y toucher) — elle a choisi l'option intermédiaire. Aucun changement de total de non-régression
 sur les 7 fichiers de référence.
 
+### 49. Prix figé alors que le conditionnement décrit plusieurs pièces (vendu "à la pièce")
+
+Quand l'Unité de référence est déjà à la pièce ('PC') et que le ratio Prix commande ÷ Prix
+référence confirme candidat_ok = 1 (le CONTENANT ENTIER est vendu, pas chacune de ses N
+pièces — règle existante, voir "PLAQUE DE 30 PIECES" = un gâteau entier coupé en 30 parts),
+rien n'était signalé dès que le Poids à l'unité de référence était déjà rempli — l'unité de
+commande se faisait renommer d'après le récipient du conditionnement, sans jamais questionner
+si le Prix de commande (identique au Prix de référence, donc jamais multiplié par N) a vraiment
+un sens pour ce récipient. Nouveau signalement sur le Prix de référence : "Le conditionnement
+indique N pièces, mais le Prix de commande est égal au Prix de référence — rien n'indique
+qu'il couvre bien les N pièces plutôt qu'une seule."
+
+Signalé SEULEMENT quand c'est le moteur qui vient d'inférer/changer l'unité de commande à
+partir du conditionnement — jamais quand la personne qui a rempli le fichier avait déjà écrit
+elle-même ce récipient (ou son équivalent officiel déjà reconnu) comme unité de commande :
+une confirmation humaine, pas une inférence. Trouvé par l'utilisateur sur Base IANOR AGAPE 16
+Epicerie, lignes 77-83 ("carton de 120 pièces" avec unité de commande SOURCE = 'unité', prix
+jamais multiplié). Distingué, après qu'elle ait demandé si l'unité de commande source était
+déjà le contenant ou non dans un cas de "bolo" (gâteau), de deux faux positifs rencontrés en
+testant sur les 7 fichiers de référence : "PLAQUE DE 30 PIECES" (groupement 2, ligne 588,
+unité de commande SOURCE déjà 'PLAQUE') et "COLIS DE 12 BOTTES" (groupement commun, lignes
+296/297/433, unité de commande SOURCE déjà 'CARTON', l'équivalent officiel de 'colis') — dans
+les deux cas, une plaque/un colis entier à un prix plausible, déjà confirmé par la personne qui
+a rempli le fichier, pas une inférence à vérifier. Exige de comparer l'unité de commande
+D'ORIGINE au bon mot : celui du récipient EXTÉRIEUR d'un contenant imbriqué (mot_ext_imbrique,
+ex: "colis" dans "COLIS DE 12 BOTTES") s'il existe, sinon le mot du récipient trouvé
+directement (mot_piece) — et à la fois le mot brut ET son équivalent officiel reconnu
+(CONTENANT_ABREGE, et dans `audit_general_commentaires.py` aussi EQUIVALENTS_OFFICIELS_BASE,
+qui couvre des cas que CONTENANT_ABREGE ne couvre pas dans ce moteur spécifiquement).
+
+Au passage, bug corrigé dans `audit_general_commentaires.py` : le signalement générique du
+Prix de référence (`elif resultat.couleur_k in COULEURS_INCOHERENCE and resultat.commentaire_k`)
+remplaçait TOUJOURS le texte déjà préparé par un message générique ("ne semble pas correspondre
+à l'emballage ou au prix de commande"), alors que `resultat.commentaire_k` est toujours déjà
+rempli à ce stade (la condition l'exige) — jetait donc systématiquement une explication utile
+déjà écrite. Réutilise maintenant `resultat.commentaire_k`/`resultat.couleur_k` directement,
+comme le fait déjà `audit_general.py` pour le même cas.
+
+N'affecte qu'une seule ligne parmi les 7 fichiers de référence : "Base article groupement
+commun", ligne 828 ("LEVURE BOULANGER 42 G X12", Conditionnement "BARQUETTE 42 G X12", unité de
+commande SOURCE = "COLIS" — ne correspond ni à "barquette" ni à son équivalent officiel, donc
+une vraie inférence de ce moteur, à juste titre signalée). Totaux mis à jour : +1 cellule
+marquée dans les deux moteurs (lignes avec incohérence inchangées, cette ligne était déjà
+signalée pour une autre raison).
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article

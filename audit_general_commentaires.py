@@ -1251,6 +1251,56 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                     f"le ratio Prix commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = "
                     f"{round(ratio, 3)}) confirme que le prix est pour le contenant ENTIER, pas "
                     "pour une part individuelle — poids trouvé dans la désignation.")
+            # Indépendamment du poids ci-dessus (qui peut rester vide si poids_ref était déjà
+            # rempli) : le ratio ne confirme PAS que le Prix de commande reflète les
+            # total_pieces pièces du conditionnement (ratio = 1, pas total_pieces). Signalé
+            # SEULEMENT quand l'unité de commande D'ORIGINE n'était ni le mot du récipient qui
+            # compte ici (mot_ext_imbrique s'il existe — le contenant EXTÉRIEUR d'un contenant
+            # imbriqué, ex: 'colis' dans 'COLIS DE 12 BOTTES' — sinon mot_piece directement),
+            # ni son équivalent officiel déjà reconnu (CONTENANT_ABREGE, ex: 'CARTON' pour
+            # 'colis') : dans ces deux cas, la personne qui a rempli le fichier avait déjà
+            # choisi elle-même ce récipient comme unité de commande, ce n'est pas une
+            # inférence de ce moteur à partir du seul texte du conditionnement, donc rien à
+            # vérifier (ex: 'COLIS DE 12 BOTTES' avec unité de commande déjà 'CARTON' —
+            # l'équivalent officiel de 'colis' ; ou 'PLAQUE DE 30 PIECES' avec unité de
+            # commande déjà 'PLAQUE' — même mot, littéralement). Voir Base article groupement
+            # 2 ligne 588 (brownie, plaque entière à 19,85€ coupée en 30 parts, prix cohérent
+            # tel quel) et groupement commun lignes 296/685 (persil/brownie en colis, prix
+            # déjà celui du colis entier) : aucun alarme à poser là. Contrairement à Base IANOR
+            # AGAPE 16 Epicerie, lignes 77-83, où l'unité de commande SOURCE était 'unité', pas
+            # 'carton'/'paquet' — là, c'est bien CE MOTEUR qui vient d'inférer le changement
+            # (r.nouveau_l posé juste au-dessus) : décidé avec l'utilisateur le 2026-11-10
+            # après qu'elle ait demandé si l'unité de commande source était déjà le contenant
+            # ou non, dans le cas du "bolo" (groupement 2, ligne 588) — affiné en 2 temps :
+            # comparer seulement à mot_piece ratait le cas imbriqué 'COLIS DE 12 BOTTES' (le
+            # mot qui compte pour l'unité de commande y est 'colis', pas 'botte', la pièce
+            # comptée) ; se fier seulement à r.nouveau_l ratait à son tour le cas 'PLAQUE' (son
+            # équivalent officiel 'PLATEAU' diffère du mot déjà écrit, donc r.nouveau_l est
+            # posé même si rien n'a été réellement inféré).
+            mot_qui_compte = mot_ext_imbrique or mot_piece
+            # Deux tables différentes, pour deux raisons différentes (même logique que dans
+            # verifie_unite_commande_etendue) : CONTENANT_ABREGE reconnaît une abréviation du
+            # MÊME récipient (ex: 'bq' -> 'BARQUETTE') ; EQUIVALENTS_OFFICIELS_BASE reconnaît
+            # qu'un mot non reconnu par la base a déjà été remplacé par son équivalent officiel
+            # (ex: 'colis' -> 'CARTON', un choix différent mais correct) — ce 2e cas n'est PAS
+            # couvert par CONTENANT_ABREGE dans ce moteur (qui n'y force justement pas la
+            # conversion, voir son usage ailleurs), d'où le besoin des deux ici.
+            equivalents_deja_ecrits = {
+                motor.normalise_texte(mot_qui_compte),
+                motor.normalise_texte(motor.CONTENANT_ABREGE.get(mot_qui_compte, mot_qui_compte)),
+                motor.normalise_texte(EQUIVALENTS_OFFICIELS_BASE.get(mot_qui_compte, mot_qui_compte)),
+            } if mot_qui_compte else set()
+            if (mot_qui_compte and total_pieces > 1
+                    and motor.normalise_texte(unite_cmd) not in equivalents_deja_ecrits):
+                r.couleur_k = motor.COULEUR_RATIO_SUSPECT
+                r.commentaire_k = (
+                    f"Le conditionnement ('{conditionnement}') indique {total_pieces} pièces, "
+                    f"mais le Prix de commande ({formate_prix(prix_cmd)}€) est égal au Prix de "
+                    f"référence ({formate_prix(prix_ref)}€) — rien n'indique qu'il couvre bien "
+                    f"les {total_pieces} pièces plutôt qu'une seule. Vérifiez si le Prix de "
+                    f"commande et/ou l'Unité de commande "
+                    f"('{r.nouveau_l or mot_qui_compte.upper()}') reflètent bien tout le "
+                    "conditionnement, ou seulement une pièce.")
         elif candidat_ok != total_pieces:
             # Le ratio confirme un SOUS-groupe intermédiaire (ex: 'CARTON DE 12 X 36
             # TRANCHES' : ratio = 12, le carton contient 12 paquets de 36 tranches chacun — le
@@ -2848,10 +2898,17 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                    motor.COULEUR_RATIO_SUSPECT, fournisseur["nom"], texte)
             total += 1
         elif resultat.couleur_k in COULEURS_INCOHERENCE and resultat.commentaire_k:
+            # Réutilise le texte déjà préparé (resultat.commentaire_k), spécifique à la règle
+            # qui a posé ce signalement — jamais un texte générique à la place : ce dernier
+            # existe toujours dès qu'on arrive ici (la condition l'exige déjà), donc le
+            # remplacer par un texte générique ne faisait que jeter une explication utile déjà
+            # écrite (même bug que celui corrigé le 2026-11-10 sur le message "comparaison des
+            # prix" de k_differe, juste au-dessus). Repéré en ajoutant la nouvelle règle
+            # "Conditionnement indique N pièces, mais Prix de commande = Prix de référence" :
+            # le texte spécifique disparaissait ici, remplacé par "ne semble pas correspondre à
+            # l'emballage..." qui ne dit rien sur le N pièces en cause.
             marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]),
-                   motor.COULEUR_A_VERIFIER, fournisseur["nom"],
-                   f"Le prix de référence ('{prix_ref}') ne semble pas correspondre à "
-                   "l'emballage ou au prix de commande — à vérifier à la main.")
+                   resultat.couleur_k, fournisseur["nom"], resultat.commentaire_k)
             total += 1
         if (resultat.couleur_l in COULEURS_INCOHERENCE and resultat.commentaire_l
                 and (not l_differe) and resultat.nouveau_l is None):
