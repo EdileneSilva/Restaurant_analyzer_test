@@ -119,7 +119,11 @@ detecte_format` considérait un fichier "canonique" dès qu'il trouvait les en-t
 "désignation de l'article" + "unité de référence" en ligne 1-5, sans vérifier le nombre de
 colonnes ni leur contenu exact — les fichiers `Base IANOR AGAPE 16 ...` passaient donc ce test
 alors qu'il leur manque la colonne 6, sans que personne n'en soit informé. Un 4e statut
-externe, `incomplet` (`canonique_incomplet` en interne), a été ajouté : ces fichiers restent
-utilisables tels quels pour l'audit (rien n'est décalé, la lecture des colonnes se fait par
-texte d'en-tête, pas par position), mais l'app affiche désormais une note explicite plutôt que
-de les traiter silencieusement comme `deja_au_format`.
+externe, `incomplet` (`canonique_incomplet` en interne), signale désormais ce cas — et
+(demandé le jour même, un premier essai se contentant de signaler ayant été jugé insuffisant :
+tous les fichiers canoniques doivent partager la même structure) `transforme_automatiquement`
+**insère réellement** la colonne manquante (en-tête + cellules vides, rien à inventer comme
+contenu) à la bonne position, décalant nativement tout le reste (`ws.insert_cols`) — la
+lecture des colonnes se faisant par texte d'en-tête, pas par position, ce décalage ne perturbe
+jamais l'audit. Le fichier produit est un vrai fichier canonique complet, identique en
+structure aux autres.

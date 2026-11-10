@@ -831,16 +831,30 @@ l'utilisateur le 2026-11-10 (voir aussi `detection_format_causes.md`, section 4,
 séparément" depuis le 2026-10-30, jamais traité jusqu'ici).
 
 Nouveau 4e statut externe `incomplet` (`canonique_incomplet` en interne) : un fichier
-canonique SANS cette colonne reçoit ce statut plutôt que `deja_au_format`. Il reste utilisable
-tel quel pour l'audit (`transforme_automatiquement` le traite exactement comme `canonique`,
-rien n'est transformé) — la lecture des autres colonnes se fait par texte d'en-tête, pas par
-position fixe, donc l'absence de cette colonne ne décale jamais les suivantes ; le seul effet
-réel est que `col_nb_pieces` reste `None` pour ces fichiers (fonctionnalité simplement
-indisponible, pas une corruption). `audit_pipeline.py` affiche désormais une note explicite
-("reconnu comme format canonique, mais incomplet : ...") plutôt que de rester silencieux.
-Aucun changement de total de non-régression sur les 7 fichiers `pret_pour_audit/` de référence
-(tous ont la colonne complète) ; validé sur les 6 fichiers `Base IANOR AGAPE 16` de
-`a_inspecter/`, qui basculent bien de `deja_au_format` à `incomplet`.
+canonique SANS cette colonne reçoit ce statut plutôt que `deja_au_format`, pour que
+`audit_pipeline.py` puisse en informer la personne plutôt que de rester silencieux.
+
+**Mise à jour (2026-11-10, le jour même)** : un premier essai se contentait de SIGNALER
+l'absence (fichier passé tel quel à l'audit, `col_nb_pieces` restant `None`) — l'utilisateur a
+jugé que ce n'était pas une bonne idée : toute la famille de fichiers canoniques doit partager
+exactement la même structure. Remplacé par une vraie correction : `transforme_automatiquement`
+appelle désormais `complete_colonnes_canonique_incomplet()`, qui INSÈRE réellement la colonne
+"Nombre de pièces dans conditionnement" (en-tête + cellules vides, aucune donnée n'existe pour
+ce champ dans ces fichiers — rien à inventer, juste la structure), à la bonne position (juste
+après "Poids à l'unité de référence", repérée par texte d'en-tête, pas par position fixe)
+— via `ws.insert_cols`, qui décale nativement tout le contenu/style des colonnes suivantes.
+Le fichier produit est désormais un VRAI fichier canonique complet, identique en structure à
+tous les autres. `nb_lignes` n'est donc plus `None` pour ce cas (136 lignes de données pour
+l'exemple "Produits laitiers", comptées sur la colonne Désignation) : `audit_pipeline.py`
+l'affiche comme une transformation réelle ("reconnu comme format canonique, mais incomplet —
+corrigé automatiquement avant l'audit : ..."), avec le fichier "formaté" téléchargeable comme
+pour les autres familles transformées (REGAL/GRADA/a_formater). Validé en relisant le fichier
+produit : la colonne apparaît à la bonne position, toutes les données suivantes (Fournisseur,
+Conditionnement, Origine...) sont décalées d'une colonne sans aucune perte, et l'audit continue
+de les localiser correctement (lecture par texte d'en-tête). Aucun changement de total de
+non-régression sur les 7 fichiers `pret_pour_audit/` de référence (déjà complets, jamais
+concernés par ce chemin de code) ; validé sur les 6 fichiers `Base IANOR AGAPE 16` de
+`a_inspecter/`.
 
 ## Jeu de référence (pour TT-09)
 

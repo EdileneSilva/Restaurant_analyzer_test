@@ -104,14 +104,20 @@ a choisi d'en faire un statut externe à part entière plutôt qu'une simple not
   trouvées (`_ligne_entete_canonique`) mais que `_colonne_nb_pieces_absente()` confirme
   l'absence de la colonne "Nombre de pièces dans conditionnement" sur cette même ligne
   d'en-tête.
-- `transforme_automatiquement()` le traite exactement comme `canonique` (rien à transformer,
-  `nb_lignes` reste `None`/`0` comme pour un .xls converti) — seule différence, `causes` porte
-  une cause INFORMATIVE à part, `COLONNE_OPTIONNELLE_ABSENTE`, qui ne bloque jamais rien
-  (contrairement aux autres causes du tableau ci-dessus, toujours liées à un `non_formatable`).
-- `audit_pipeline._pretraite_fichiers()` affiche cette cause comme une note (pas une erreur) :
-  "reconnu comme format canonique, mais incomplet : ...".
-- Aucun impact sur la lecture des autres colonnes : `localise_feuille_et_colonnes`
-  (`audit_general.py`) les repère par texte d'en-tête, jamais par position fixe — l'absence
-  d'une colonne ne décale donc jamais les suivantes. Le seul effet réel est que
-  `col_nb_pieces` reste `None` pour ces fichiers (la fonctionnalité "Nombre de pièces" n'est
-  simplement pas disponible), pas une corruption de données.
+- **Mise à jour (2026-11-10, le jour même)** : `transforme_automatiquement()` ne se contente
+  plus de signaler sans rien changer — l'utilisateur a demandé une vraie correction, pour que
+  tous les fichiers canoniques partagent la même structure. Appelle désormais
+  `complete_colonnes_canonique_incomplet()`, qui INSÈRE la colonne manquante (en-tête +
+  cellules vides, via `ws.insert_cols` — décale nativement tout le contenu/style des colonnes
+  suivantes) à la bonne position (juste après "Poids à l'unité de référence", repérée par
+  texte d'en-tête). `nb_lignes` est donc un vrai compte (plus `None`/`0`), comme pour les
+  autres familles transformées (REGAL/GRADA/a_formater) ; `causes` continue de porter une
+  cause INFORMATIVE, `COLONNE_OPTIONNELLE_ABSENTE`, qui ne bloque jamais rien (contrairement
+  aux autres causes du tableau ci-dessus, toujours liées à un `non_formatable`).
+- `audit_pipeline._pretraite_fichiers()` affiche cette cause comme une note de transformation
+  réelle (pas une erreur) : "reconnu comme format canonique, mais incomplet — corrigé
+  automatiquement avant l'audit : ...".
+- Aucun impact sur la lecture des autres colonnes, ni avant ni après l'insertion :
+  `localise_feuille_et_colonnes` (`audit_general.py`) les repère par texte d'en-tête, jamais
+  par position fixe — un décalage de colonnes (qu'il soit dû à l'absence d'origine, ou à
+  l'insertion qui la corrige) ne perturbe donc jamais la lecture des autres champs.

@@ -121,6 +121,62 @@ def _colonne_nb_pieces_absente(ws, ligne_entete):
     return not any("nombre de" in t and "pieces" in t for t in textes)
 
 
+def _colonne_insertion_nb_pieces(ws, ligne_entete):
+    """Position où insérer la colonne "Nombre de pièces dans conditionnement" dans une feuille
+    canonique qui ne l'a pas : juste après "Poids à l'unité de référence" (sa position dans
+    format_cible.md, colonne 6, juste avant le 1er bloc Fournisseur) — repérée par texte
+    d'en-tête, pas par position fixe, pour s'adapter à n'importe quel décalage déjà présent.
+    Si aucune colonne "Poids..." n'est trouvée (cas non vu en pratique), se rabat juste après
+    "Unité de référence"."""
+    col_poids = col_unite_ref = None
+    for c in range(1, ws.max_column + 1):
+        texte = pt._normalise(ws.cell(row=ligne_entete, column=c).value)
+        if texte.startswith("poids") and col_poids is None:
+            col_poids = c
+        elif texte.startswith("unite") and "reference" in texte and col_unite_ref is None:
+            col_unite_ref = c
+    return (col_poids + 1) if col_poids else (col_unite_ref + 1 if col_unite_ref else 6)
+
+
+def complete_colonnes_canonique_incomplet(chemin_source, chemin_sortie):
+    """Complète un fichier déjà "canonique" auquel il manque la colonne "Nombre de pièces dans
+    conditionnement" (voir detecte_format, 'canonique_incomplet') : insère la colonne à la
+    bonne position (juste après "Poids à l'unité de référence"), avec son en-tête, cellules
+    vides (aucune donnée n'existe pour ce champ dans ces fichiers — rien à inventer, juste la
+    structure attendue). `ws.insert_cols` décale nativement tout le contenu/style des colonnes
+    suivantes, rien d'autre n'est modifié. Toutes les feuilles canoniques concernées de ce
+    classeur sont complétées (une famille comme "Base IANOR AGAPE 16" n'a qu'une seule feuille
+    de données, mais rien n'empêche plusieurs onglets dans un futur fichier similaire).
+    Renvoie le nombre de lignes de données (Désignation non vide) sous l'en-tête, dans la
+    PREMIÈRE feuille canonique trouvée. Demandé par l'utilisateur le 2026-11-10 : plutôt que de
+    seulement signaler l'absence de cette colonne (voir 'incomplet' dans detecte_statut), pour
+    que tous les fichiers canoniques partagent exactement la même structure."""
+    wb = openpyxl.load_workbook(chemin_source)  # pas data_only : préserve formules/styles
+    nb_lignes = 0
+    premiere_feuille_traitee = False
+    for ws in wb.worksheets:
+        ligne_entete = _ligne_entete_canonique(ws)
+        if not ligne_entete or not _colonne_nb_pieces_absente(ws, ligne_entete):
+            continue
+        col_designation = next(
+            (c for c in range(1, ws.max_column + 1)
+             if "designation de l'article" in pt._normalise(ws.cell(row=ligne_entete, column=c).value)),
+            None)
+        col_insertion = _colonne_insertion_nb_pieces(ws, ligne_entete)
+        ws.insert_cols(col_insertion)
+        ws.cell(row=ligne_entete, column=col_insertion).value = (
+            "Nombre de pièces dans conditionnement")
+        if not premiere_feuille_traitee:
+            if col_designation and col_designation >= col_insertion:
+                col_designation += 1  # décalée par l'insertion ci-dessus
+            nb_lignes = sum(
+                1 for r in range(ligne_entete + 1, ws.max_row + 1)
+                if col_designation and ws.cell(row=r, column=col_designation).value)
+            premiere_feuille_traitee = True
+    wb.save(chemin_sortie)
+    return nb_lignes
+
+
 def _est_regal(ws):
     textes_entete = {pt._normalise(ws.cell(row=1, column=c).value) for c in range(1, ws.max_column + 1)}
     return "designation produit" in textes_entete and "cond rendu dans magento" in textes_entete
@@ -340,20 +396,25 @@ def transforme_automatiquement(chemin_source, chemin_sortie, nom_fichier=None):
 
     format_detecte = detecte_format(chemin_source, nom_fichier=nom_fichier_registre)
 
-    if format_detecte in ("canonique", "canonique_incomplet"):
-        # 'canonique_incomplet' (voir detecte_format) : rien à transformer, le fichier reste
-        # utilisable tel quel pour l'audit exactement comme 'canonique' — seule différence,
-        # une cause INFORMATIVE (pas bloquante : nb_lignes reste None/0, pas None/None comme
-        # pour un vrai échec) signale la colonne structurelle manquante, pour que l'appelant
-        # (audit_pipeline.py) puisse en informer la personne plutôt que de rester silencieux.
-        causes_info = [] if format_detecte == "canonique" else [{
+    if format_detecte == "canonique_incomplet":
+        # Contrairement à 'canonique' (bloc suivant, simple passage tel quel) : insère pour de
+        # bon la colonne manquante (voir complete_colonnes_canonique_incomplet), pour que TOUS
+        # les fichiers canoniques partagent la même structure, plutôt que de seulement
+        # signaler l'absence sans rien corriger — demandé par l'utilisateur le 2026-11-10,
+        # après avoir d'abord essayé un simple signalement ('incomplet' dans detecte_statut,
+        # toujours renvoyé pour que l'appelant sache qu'une correction a eu lieu).
+        _reseek(chemin_source)
+        nb_lignes = complete_colonnes_canonique_incomplet(chemin_source, chemin_sortie)
+        return "canonique_incomplet", nb_lignes, [{
             "code": "COLONNE_OPTIONNELLE_ABSENTE",
             "message": (
-                "Colonne « Nombre de pièces dans conditionnement » absente de l'en-tête — ce "
-                "champ restera vide pour ce fichier, le reste de l'audit fonctionne normalement."
+                "Colonne « Nombre de pièces dans conditionnement » absente de l'en-tête — "
+                "ajoutée automatiquement (vide, aucune donnée disponible pour ce champ) avant "
+                "l'audit."
             ),
             "onglet": None, "colonne": "Nombre de pièces dans conditionnement", "cellule": None,
         }]
+    if format_detecte == "canonique":
         if foi_convertido_de_xls:
             _reseek(chemin_source)
             conteudo = chemin_source.read()
@@ -362,8 +423,8 @@ def transforme_automatiquement(chemin_source, chemin_sortie, nom_fichier=None):
             else:
                 with open(chemin_sortie, "wb") as f:
                     f.write(conteudo)
-            return format_detecte, 0, causes_info
-        return format_detecte, None, causes_info
+            return "canonique", 0, []
+        return "canonique", None, []
     if format_detecte == "regal":
         _reseek(chemin_source)
         try:

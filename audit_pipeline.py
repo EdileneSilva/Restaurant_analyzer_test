@@ -80,7 +80,17 @@ def _pretraite_fichiers(fichiers):
 
         if nb_lignes is not None:
             contenu = tampon_sortie.getvalue()
-            if formato not in ("canonique", "canonique_incomplet"):
+            if formato == "canonique_incomplet":
+                # Voir pretraitement_auto.complete_colonnes_canonique_incomplet : contrairement
+                # à 'canonique' (ci-dessous, simple passage/conversion .xls), une vraie colonne
+                # a été insérée ici — demandé le 2026-11-10 pour que tous les fichiers
+                # canoniques partagent la même structure, pas juste un signalement silencieux.
+                detail = " ; ".join(c["message"] for c in causas)
+                notes_pretraitement.append(
+                    f"**{nom_fichier}** reconnu comme format canonique, mais incomplet — "
+                    f"corrigé automatiquement avant l'audit : {detail}"
+                )
+            elif formato != "canonique":
                 notes_pretraitement.append(
                     f"**{nom_fichier}** reconnu comme format « {formato} » et transformé "
                     f"automatiquement ({nb_lignes} lignes) avant l'audit."
@@ -90,17 +100,6 @@ def _pretraite_fichiers(fichiers):
                     f"**{nom_fichier}** était en .xls (ancien format), converti en .xlsx "
                     "automatiquement avant l'audit."
                 )
-
-        # 'canonique_incomplet' (voir pretraitement_auto.detecte_format) : le fichier est
-        # utilisable tel quel (comme 'canonique', ci-dessus), mais une colonne structurelle
-        # attendue manque — signalé explicitement, plutôt que de le confondre silencieusement
-        # avec un fichier réellement complet. `causas` ne porte ici qu'une cause informative,
-        # jamais bloquante (voir transforme_automatiquement). Demandé le 2026-11-10.
-        if formato == "canonique_incomplet" and causas:
-            notes_pretraitement.append(
-                f"**{nom_fichier}** reconnu comme format canonique, mais incomplet : "
-                + " ; ".join(c["message"] for c in causas)
-            )
 
         # À ce stade, `contenu` est toujours le contenu APRÈS prétraitement (transformé, ou
         # identique au contenu déposé si rien n'avait besoin de l'être) — `nb_lignes is not
