@@ -713,7 +713,14 @@ def reconsidere_format_boite(resultat, conditionnement, unite_cmd):
     précédentes) ne retient que 'BOITE' nue, on récupère le format."""
     if not conditionnement:
         return
-    m = RE_FORMAT_BOITE.search(conditionnement)
+    # Recherche sur le texte normalisé (accents retirés), pas sur le texte brut : 'boîte'
+    # (accentué, la graphie la plus courante dans les fichiers réels — ex: Base IANOR AGAPE 16
+    # Epicerie, lignes 3 à 218) ne correspond à aucun des deux côtés de RE_FORMAT_BOITE (ni
+    # 'boi?te', qui ne reconnaît que des variantes SANS accent), donc ne matchait jamais, et le
+    # format 'N/M' n'était jamais récupéré. Marche aussi bien pour 'boite' (déjà sans accent),
+    # donc couvre les deux graphies sans dupliquer le motif. Trouvé par l'utilisateur le
+    # 2026-11-10.
+    m = RE_FORMAT_BOITE.search(motor.normalise_texte(conditionnement))
     if not m:
         return
     valeur_actuelle = resultat.nouveau_l if resultat.nouveau_l is not None else unite_cmd

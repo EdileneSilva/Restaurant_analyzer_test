@@ -712,6 +712,24 @@ une vraie inférence de ce moteur, à juste titre signalée). Totaux mis à jour
 marquée dans les deux moteurs (lignes avec incohérence inchangées, cette ligne était déjà
 signalée pour une autre raison).
 
+### 50. Bug corrigé — format "BOITE N/M" jamais récupéré quand "boîte" est écrit avec son accent
+
+`reconsidere_format_boite` (règle n°34) cherchait le motif "BOITE N/M" directement dans le
+texte BRUT du Conditionnement, avec une regex qui ne reconnaît que des variantes SANS accent
+("boite"/"boites"/"bote"/"botes"). Dans un vrai fichier ("î" accentué, l'orthographe standard
+du mot en français), la regex ne correspondait donc JAMAIS, et le format N/M n'était jamais
+récupéré : l'Unité de commande restait "BOITE" générique au lieu de "BOITE 5/1"/"BOITE 3/1"
+etc., silencieusement, sans même un signalement — un vrai regroupement perdu, pas juste un
+cas "à vérifier". Trouvé par l'utilisateur sur `Base IANOR AGAPE 16 Epicerie.xlsx`, lignes 3
+à 218 (plus de 60 lignes, "boîte 3/1"/"boîte 4/4"/"boîte 5/1"... partout dans le fichier).
+
+Corrigé en cherchant le motif sur le texte NORMALISÉ (accents retirés via
+`motor.normalise_texte`), pas sur le texte brut — fonctionne aussi bien pour "boîte" (accentué,
+la graphie la plus courante dans les fichiers réels) que pour "boite" (déjà sans accent,
+parfois vu aussi), sans avoir à dupliquer le motif pour chaque variante d'accentuation.
+Aucun changement de total de non-régression sur les 7 fichiers de référence (aucun n'a cet
+accent sur ce mot précis).
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
