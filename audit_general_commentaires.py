@@ -43,6 +43,7 @@ import re
 import statistics
 import sys
 import unicodedata
+from decimal import Decimal, ROUND_HALF_UP
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import first_scripts.first_attempt_v2_prototype as motor  # noqa: E402  (règles de cohérence déjà validées)
@@ -207,6 +208,21 @@ RE_QUALIFICATIF_CONTENANT = re.compile(r"\bKRAFT\b", re.I)
 # de 'CARTON DE 4 POCHES DE 5 KG'. Pas de \b de fin : la plage colle parfois directement au mot
 # suivant, sans espace.
 RE_PLAGE_CELLULE_COLLEE = re.compile(r"\b[A-Z]{1,3}\d{1,7}\s*:\s*[A-Z]{1,3}\d{1,7}")
+
+
+def formate_prix(valeur):
+    """Arrondi "classique" à 2 décimales pour tout prix affiché dans un commentaire (ex: 0,5
+    arrondit toujours vers le haut) — PAS le round() de Python, qui utilise l'arrondi au pair
+    le plus proche ("banker's rounding", ex: round(0.225, 2) vaut 0.23 mais round(2.675, 2) vaut
+    2.67 à cause de l'imprécision binaire de 2.675 en float). Passe par `str(valeur)` avant
+    `Decimal` : c'est la représentation décimale la plus courte qui redonne exactement ce float
+    (l'algorithme `repr` de Python), donc ce qu'une personne a réellement voulu dire, plutôt que
+    la valeur binaire exacte (légèrement différente) que donnerait `Decimal(valeur)` direct.
+    Renvoie une chaîne à exactement 2 décimales (ex: "2.50", jamais "2.5"). Demandé par
+    l'utilisateur le 2026-11-10 : toute mention ou suggestion de prix dans un commentaire doit
+    utiliser cet arrondi, jamais un nombre à plus de 2 décimales."""
+    arrondi = Decimal(str(valeur)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return f"{arrondi:.2f}"
 
 
 def nettoie_conditionnement(texte):
@@ -1012,13 +1028,14 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
             # l'utilisateur le 2026-11-10, pour ne pas affirmer une seule direction de
             # correction sans savoir laquelle des deux valeurs est fautive.
             r.commentaire_k = (
-                f"Le Prix de référence actuel ({prix_ref}) ne correspond pas au Prix de "
-                f"commande ({prix_cmd}) divisé par le nombre de pièces ({n}). Deux lectures "
-                f"possibles, impossible de savoir laquelle est la bonne : soit le Prix de "
-                f"référence devrait être {prix_cmd} ÷ {n} = {prix_par_piece} (si {prix_cmd} "
-                f"couvre les {n} pièces), soit le Prix de commande devrait être {prix_ref} × "
-                f"{n} = {round(prix_ref * n, 4)} (si {prix_ref} est déjà le bon prix par "
-                "pièce) — à vérifier, rien n'est modifié automatiquement.")
+                f"Le Prix de référence actuel ({formate_prix(prix_ref)}€) ne correspond pas au "
+                f"Prix de commande ({formate_prix(prix_cmd)}€) divisé par le nombre de pièces "
+                f"({n}). Deux lectures possibles, impossible de savoir laquelle est la bonne : "
+                f"soit le Prix de référence devrait être {formate_prix(prix_cmd)}€ ÷ {n} = "
+                f"{formate_prix(prix_par_piece)}€ (si {formate_prix(prix_cmd)}€ couvre les {n} "
+                f"pièces), soit le Prix de commande devrait être {formate_prix(prix_ref)}€ × "
+                f"{n} = {formate_prix(prix_ref * n)}€ (si {formate_prix(prix_ref)}€ est déjà le "
+                "bon prix par pièce) — à vérifier, rien n'est modifié automatiquement.")
         return r
 
     resultat_pieces = piece_carton_candidats(unite_ref, conditionnement)
@@ -1550,15 +1567,18 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                     # ne pas affirmer une seule direction de correction sans savoir laquelle des
                     # deux valeurs est fautive.
                     r.commentaire_k = (
-                        f"Le Prix de référence actuel ({prix_ref}) ne correspond pas au Prix de "
-                        f"commande ({prix_cmd}) divisé par la quantité du conditionnement "
-                        f"('{conditionnement}' = {qte_affichee} {base}). Deux lectures "
-                        f"possibles, impossible de savoir laquelle est la bonne : soit le Prix "
-                        f"de référence devrait être {prix_cmd} ÷ {qte_affichee} {base} = "
-                        f"{nouveau_k} (si {prix_cmd} couvre tout le conditionnement), soit le "
-                        f"Prix de commande devrait être {prix_ref} × {qte_affichee} = "
-                        f"{round(prix_ref * quantite, 4)} (si {prix_ref} est déjà le bon prix "
-                        f"au {base}) — à vérifier, rien n'est modifié automatiquement.")
+                        f"Le Prix de référence actuel ({formate_prix(prix_ref)}€) ne correspond "
+                        f"pas au Prix de commande ({formate_prix(prix_cmd)}€) divisé par la "
+                        f"quantité du conditionnement ('{conditionnement}' = {qte_affichee} "
+                        f"{base}). Deux lectures possibles, impossible de savoir laquelle est "
+                        f"la bonne : soit le Prix de référence devrait être "
+                        f"{formate_prix(prix_cmd)}€ ÷ {qte_affichee} {base} = "
+                        f"{formate_prix(nouveau_k)}€ (si {formate_prix(prix_cmd)}€ couvre tout "
+                        f"le conditionnement), soit le Prix de commande devrait être "
+                        f"{formate_prix(prix_ref)}€ × {qte_affichee} = "
+                        f"{formate_prix(prix_ref * quantite)}€ (si {formate_prix(prix_ref)}€ "
+                        f"est déjà le bon prix au {base}) — à vérifier, rien n'est modifié "
+                        "automatiquement.")
                     if mot in ("piece", "pièce"):
                         # 'piece' générique (pas un vrai récipient nommé) : l'incohérence peut
                         # aussi bien venir d'une Unité de référence mal choisie (l'article est
@@ -2456,9 +2476,9 @@ def verifie_coherence_unite_prix_identiques(resultat, unite_ref, unite_cmd, prix
         # l'unité affichée est identique des deux côtés.
         return (
             f"Unité de référence et Unité de commande identiques ('{l_final}'), donc les deux "
-            f"prix devraient être égaux — mais Prix de référence ({prix_ref}) ≠ Prix de "
-            f"commande ({prix_cmd}). Vérifiez le prix, ou si l'Unité de commande devrait plutôt "
-            f"nommer le conditionnement réel ('{conditionnement}')."
+            f"prix devraient être égaux — mais Prix de référence ({formate_prix(prix_ref)}€) ≠ "
+            f"Prix de commande ({formate_prix(prix_cmd)}€). Vérifiez le prix, ou si l'Unité de "
+            f"commande devrait plutôt nommer le conditionnement réel ('{conditionnement}')."
         )
 
     # Les prix RÉELS sont déjà égaux ici (sinon le cas ci-dessus aurait déjà renvoyé un
@@ -2480,19 +2500,20 @@ def verifie_coherence_unite_prix_identiques(resultat, unite_ref, unite_cmd, prix
         # devrait baisser vers nouveau_k, ou le Conditionnement/Unité de commande qui est mal
         # nommé et le prix est en fait correct pour tout le conditionnement.
         facteur = prix_cmd / resultat.nouveau_k if resultat.nouveau_k else None
-        prix_alternatif = round(prix_cmd * facteur, 4) if facteur else None
+        prix_alternatif = prix_cmd * facteur if facteur else None
         indication_alternative = (
-            f", soit le Prix de commande devrait être {prix_alternatif}€"
+            f", soit le Prix de commande devrait être {formate_prix(prix_alternatif)}€"
             if prix_alternatif is not None else ""
         )
         return (
             f"Unité de référence et Unité de commande identiques ('{l_final}'), et Prix de "
-            f"référence = Prix de commande ({prix_cmd}) — cette relation est correcte. Mais le "
-            f"Conditionnement ('{conditionnement}') indique en fait une quantité différente de "
-            f"1 : impossible de savoir laquelle des deux valeurs est fautive — soit le Prix de "
-            f"référence devrait être proche de {round(resultat.nouveau_k, 4)}€"
-            f"{indication_alternative}. Vérifiez si l'Unité de commande et/ou le Prix de "
-            "commande reflètent bien tout le conditionnement, ou seulement une partie."
+            f"référence = Prix de commande ({formate_prix(prix_cmd)}€) — cette relation est "
+            f"correcte. Mais le Conditionnement ('{conditionnement}') indique en fait une "
+            f"quantité différente de 1 : impossible de savoir laquelle des deux valeurs est "
+            f"fautive — soit le Prix de référence devrait être proche de "
+            f"{formate_prix(resultat.nouveau_k)}€{indication_alternative}. Vérifiez si l'Unité "
+            "de commande et/ou le Prix de commande reflètent bien tout le conditionnement, ou "
+            "seulement une partie."
         )
     return None
 
@@ -2758,21 +2779,22 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
             # affirmer une seule direction de correction sans savoir laquelle des deux valeurs
             # est fautive.
             facteur = prix_cmd / resultat.nouveau_k if resultat.nouveau_k else None
-            prix_cmd_alternatif = round(prix_ref * facteur, 4) if facteur else None
+            prix_cmd_alternatif = prix_ref * facteur if facteur else None
             if prix_cmd_alternatif is not None:
                 texte = (
-                    f"Le Prix de référence actuel ({prix_ref}€) ne correspond pas au Prix de "
-                    f"commande ({prix_cmd}€) d'après la comparaison des prix. Deux lectures "
-                    f"possibles, impossible de savoir laquelle est la bonne : soit le Prix de "
-                    f"référence devrait être {round(resultat.nouveau_k, 4)}€, soit le Prix de "
-                    f"commande devrait être {prix_cmd_alternatif}€ — à vérifier avant de "
-                    "changer quoi que ce soit."
+                    f"Le Prix de référence actuel ({formate_prix(prix_ref)}€) ne correspond pas "
+                    f"au Prix de commande ({formate_prix(prix_cmd)}€) d'après la comparaison des "
+                    f"prix. Deux lectures possibles, impossible de savoir laquelle est la bonne "
+                    f": soit le Prix de référence devrait être "
+                    f"{formate_prix(resultat.nouveau_k)}€, soit le Prix de commande devrait être "
+                    f"{formate_prix(prix_cmd_alternatif)}€ — à vérifier avant de changer quoi "
+                    "que ce soit."
                 )
             else:
                 texte = (
                     f"D'après la comparaison des prix, le prix de référence semble plutôt "
-                    f"devoir être {round(resultat.nouveau_k, 4)}€ (ici : {prix_ref}€) — à "
-                    "vérifier avant de changer quoi que ce soit."
+                    f"devoir être {formate_prix(resultat.nouveau_k)}€ (ici : "
+                    f"{formate_prix(prix_ref)}€) — à vérifier avant de changer quoi que ce soit."
                 )
             marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]),
                    motor.COULEUR_RATIO_SUSPECT, fournisseur["nom"], texte)

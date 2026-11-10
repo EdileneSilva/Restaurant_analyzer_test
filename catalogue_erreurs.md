@@ -622,6 +622,20 @@ de commande (2.25€, pour un conditionnement "10KG") aurait tout aussi bien pu 
 avait l'erreur (devrait être 22.5€, si le Prix de référence à 2.25€ était en fait déjà
 correct). Aucun changement de total (même cellule marquée avant/après, seul le texte change).
 
+**Mise à jour (2026-11-10, arrondi)** : tout prix mentionné ou suggéré dans un commentaire
+passe maintenant par une nouvelle fonction `formate_prix()` (les deux moteurs) — arrondi
+"classique" à 2 décimales (0,5 arrondit toujours vers le haut) et toujours affiché avec le
+symbole "€", plutôt que le `round(x, 4)` utilisé jusque-là (ex: "0.225€" ou "22.5€", avec un
+nombre de décimales incohérent d'un message à l'autre). Important : n'utilise PAS le `round()`
+natif de Python, qui arrondit au pair le plus proche ("banker's rounding") et souffre en plus de
+l'imprécision binaire des float (`round(2.675, 2)` vaut 2.67 en Python, pas 2.68) —
+`formate_prix()` passe par `Decimal(str(valeur))` (la représentation décimale la plus courte qui
+redonne exactement ce float) avant d'arrondir avec `ROUND_HALF_UP`, pour un résultat qui
+correspond à ce qu'une personne attend d'un arrondi classique. Demandé explicitement par
+l'utilisateur. Aucun changement de total de non-régression (l'arrondi touche uniquement
+l'affichage dans le texte des commentaires, jamais les valeurs numériques utilisées pour décider
+si une cellule est marquée ou non).
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
