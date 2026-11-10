@@ -114,15 +114,31 @@ confirmés dans `pret_pour_audit/`), gravité pressentie, et si une règle exist
 - **Besoin métier** : pouvoir comparer le prix à l'unité (par œuf) entre fournisseurs, quel
   que soit le conditionnement (un plateau de 60 n'est pas comparable à une caisse de 360 sans
   ramener au prix par pièce).
-- **Correction appliquée** : Unité de référence → 'PC', Prix de référence recalculé par pièce
-  (prix de commande ÷ N), Unité de commande → nom du contenant seul ('PLATEAU'/'CAISSE'),
-  Nombre de pièces dans conditionnement → N (seulement si la colonne existe dans le fichier —
-  absente des fichiers IANOR AGAPE, voir erreur n°13).
+- **Correction appliquée (version d'origine, 2026-10-15)** : Unité de référence → 'PC', Prix de
+  référence recalculé par pièce (prix de commande ÷ N), Unité de commande → nom du contenant
+  seul ('PLATEAU'/'CAISSE'), Nombre de pièces dans conditionnement → N (seulement si la colonne
+  existe dans le fichier — absente des fichiers IANOR AGAPE, voir erreur n°13).
 - **Gravité pressentie** : bloquante avant correction (prix non comparable / prix de référence
   copié du prix de commande sans division) ; information une fois corrigé.
 - **Couverte par le code** : oui (ajouté le 2026-10-15, motif strict limité à "CONTENANT DE N"
   sans aucun poids — 3 lignes concernées sur les 11 fichiers testés, voir
   `RE_CONTENANT_SEUL_SANS_POIDS` dans `audit_general.py`).
+- **Révision (2026-11-10)** : une fois la colonne "Nombre de pièces" réellement disponible
+  (règle n°55) et testée de bout en bout (règle n°56), l'utilisatrice a relevé une contradiction
+  entre "Unité de référence → 'PC'" et "Nombre de pièces → N" : la colonne F se définit comme
+  le nombre de pièces contenues dans **UNE** unité de référence (`format_cible.md`, colonne 6) —
+  si l'unité de référence est déjà 'PC' (une seule pièce), un N=60 n'a pas de sens. Remplacé par
+  la même convention que le cas "PAQUET" déjà en place pour les contenants à double imbrication
+  (règle n°10, GOURDE POMME) : Unité de référence → 'PAQUET' (terme générique, pas 'PC' ni le
+  nom précis du contenant), Unité de commande → nom du contenant ('PLATEAU'/'CAISSE', inchangé),
+  Nombre de pièces → N (inchangé). Conséquences : plus de recalcul de prix par pièce — Prix de
+  référence et Prix de commande décrivent maintenant le même niveau, ils doivent simplement être
+  égaux (sinon signalé, sans jamais écrire — règle n°22) ; "Poids à l'unité de référence" ne se
+  remplit plus avec le calibre d'œuf (règle n°56, partie 3, retirée) — cette colonne ne se
+  remplit que si Unité de référence = 'PC' (`format_cible.md`), qui n'est plus le cas ici, comme
+  pour 'PAQUET'/GOURDE POMME qui la laisse vide aussi. Revalidé sur les mêmes 6 fichiers AGAPE et
+  les 3 suites de non-régression (aucun changement de total, ce chemin de code n'étant exercé
+  par aucun des 7 fichiers de référence).
 
 ### 17. Conditionnement vide pour un produit vendu au poids (CAS 2, "VRAC")
 - **Exemple réel** : `Base IANOR AGAPE 16 Viandes fraiches (1).xlsx` (29 lignes, 5-38) et
@@ -891,6 +907,24 @@ frais de poule 53/63 cat.A", "plateau de 60" des deux côtés, 26,28€ des deux
 correction, Poids à l'unité de référence = 0,053 kg, Nombre de pièces = 60, Prix de référence
 suggéré avec confiance = 26,28 ÷ 60 = 0,44€. Aucun changement de total de non-régression sur
 les 7 fichiers de référence (aucun n'a ce motif "contenant seul sans poids").
+
+**Révision (2026-11-10, le jour même) — points 2 et 3 remplacés, voir règle n°16** :
+l'utilisatrice a relevé que le point 1 ("Nombre de pièces" rempli à 60) et l'ancienne
+Unité de référence 'PC' (une seule pièce) du point 2 se contredisaient — la colonne F se
+définit comme le nombre de pièces dans UNE unité de référence, ce qui suppose que l'unité de
+référence soit le contenant (ici, le paquet/plateau), pas 'PC'. Aligné sur la convention déjà
+en place pour les contenants à double imbrication (règle n°10, "PAQUET") : Unité de référence
+→ 'PAQUET' au lieu de 'PC'. Conséquences directes :
+- Plus de recalcul de prix par pièce ni de distinction confirmé/incertain (point 2 ci-dessus,
+  retiré) : Prix de référence et Prix de commande décrivent maintenant le même niveau (le
+  paquet/plateau), ils doivent simplement être égaux — sur la ligne 104, c'est déjà le cas
+  (26,28€ des deux côtés), donc plus aucune suggestion de prix sur cette ligne précise.
+- `_poids_calibre_oeuf()` (point 3 ci-dessus) supprimée : "Poids à l'unité de référence" ne se
+  remplit que si Unité de référence = 'PC' (`format_cible.md`), qui n'est plus le cas ici,
+  exactement comme pour 'PAQUET'/GOURDE POMME (qui la laisse vide aussi) — demandé
+  explicitement par l'utilisatrice plutôt que de faire une exception à cette règle pour les
+  œufs. Revalidé sur les 6 fichiers AGAPE et les 3 suites de non-régression (aucun changement
+  de total).
 
 ### 57. Colonne insérée par la règle n°55 sans aucune mise en forme
 
