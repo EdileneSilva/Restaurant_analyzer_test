@@ -36,11 +36,18 @@ récupérable via `.cause()` en `{code, message, onglet, colonne, cellule}` :
 | Code | Catégorie demandée | Où (fonction / fichier) | Onglet | Colonne | Cellule |
 |---|---|---|---|---|---|
 | `ONGLET_MANQUANT` | onglet manquant | `_choisit_feuille_grada`, `pretraitement_auto.py` | — | — | — |
+| `ONGLET_MANQUANT` | onglet manquant | `transforme_passion_froid`, `pretraitement_a_formater.py` | — | — | — (ni « SANS DOUBLONS » ni « GLOBAL » trouvés — voir note ci-dessous) |
 | `ENTETE_MODIFIE` | en-tête modifié | `_trouve_ligne_entete_bpu`, `pretraitement_a_formater.py` | `ws.title` | — | `"lignes 1 à N"` (zone cherchée) |
 | `COLONNE_OBLIGATOIRE_ABSENTE` | colonne obligatoire absente | `transforme_catalogue_regal`, `pretraitement.py` | `ws.title` | **toutes** les colonnes manquantes, pas juste la 1ère | `"ligne 1"` (REGAL : en-tête toujours ligne 1) |
 | `COLONNE_OBLIGATOIRE_ABSENTE` | colonne obligatoire absente | `transforme_bpu_dqe`, `pretraitement_a_formater.py` | `ws.title` | **toutes** les colonnes essentielles manquantes | `"ligne N"` (ligne d'en-tête réellement trouvée) |
 | `FORMAT_NON_SUPPORTE` *(au-delà du minimum)* | format de fichier non supporté | `convertit_xls_en_xlsx`, `pretraitement_auto.py` | — | — | — (message LibreOffice brut, `stderr`) |
 | `SECTION_INTROUVABLE` *(au-delà du minimum)* | — | `_trouve_ligne_tags`, `pretraitement_grada.py` | `ws.title` | — | `"lignes 1 à N"` (zone cherchée) |
+
+`transforme_passion_froid` (fichier "Passion froid - Tarif général...") cherche d'abord
+l'onglet « SANS DOUBLONS » (déjà dédupliqué, préféré) puis, s'il est absent, se rabat sur
+« GLOBAL » (même disposition de colonnes, vérifié le 2026-11-10) — demandé par l'utilisateur
+pour que l'outil reste utilisable si un futur envoi de ce fichier ne contenait plus l'onglet
+dédupliqué. `ONGLET_MANQUANT` n'est levée que si NI l'un NI l'autre n'est trouvé.
 
 `pretraitement_auto.transforme_automatiquement()` attrape `CauseFormatInvalide` autour de
 chaque appel de transformation (REGAL/GRADA/a_formater) et renvoie `(None, None, [cause])` au

@@ -442,7 +442,22 @@ def transforme_bpu_dqe(chemin_source, chemin_sortie, nom_feuille_bpu, fournisseu
 
 def transforme_passion_froid(chemin_source, chemin_sortie):
     wb = openpyxl.load_workbook(chemin_source, data_only=True)
-    ws = wb["SANS DOUBLONS"]
+    # "SANS DOUBLONS" (préférée : déjà dédupliquée) sinon "GLOBAL" en secours, si un futur
+    # envoi de ce fichier ne contient plus l'onglet dédupliqué — même disposition de colonnes
+    # dans les deux onglets (vérifié le 2026-11-10 sur le fichier reçu), donc même lecture.
+    # Demandé par l'utilisateur, qui a choisi "SANS DOUBLONS" par défaut mais veut que l'outil
+    # reste utilisable si cet onglet venait à manquer.
+    if "SANS DOUBLONS" in wb.sheetnames:
+        ws = wb["SANS DOUBLONS"]
+    elif "GLOBAL" in wb.sheetnames:
+        ws = wb["GLOBAL"]
+    else:
+        raise CauseFormatInvalide(
+            "ONGLET_MANQUANT",
+            f"Ni l'onglet « SANS DOUBLONS » ni l'onglet « GLOBAL » n'ont été trouvés dans "
+            f"« {chemin_source} » — onglets présents : {wb.sheetnames}.",
+            onglet=None, colonne=None, cellule=None,
+        )
 
     lignes = []
     for r in range(2, ws.max_row + 1):
