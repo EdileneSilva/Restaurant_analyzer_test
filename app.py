@@ -80,11 +80,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.caption(
-    "Dépose un ou plusieurs fichiers .xlsx : déjà au format canonique "
-    "(« Base article groupement N », « MDC_IMPORT_MARCHE »...), ou dans un format "
-    "reconnu (REGAL, famille GRADA, ancien .xls) — converti automatiquement avant "
-    "l'audit. Rien n'est écrit sur le serveur : tout se passe en mémoire, pour cette "
-    "session seulement."
+    "Dépose un ou plusieurs fichiers .xlsx du marché : l'outil lance l'audit directement si le "
+    "fichier est déjà au bon format, sinon il le reformate automatiquement avant. S'il ne "
+    "reconnaît pas du tout le format, il l'indique clairement — dans ce cas, contacte la "
+    "personne responsable de l'outil."
 )
 
 fichiers_deposes = st.file_uploader(
@@ -97,8 +96,7 @@ st.caption(
     "Deux façons d'auditer, au choix : **« complet »** corrige directement une petite liste de "
     "détails mécaniques (Bio, Label, numéro de Lot, synonymes d'unité...) et surligne/commente "
     "tout le reste ; **« commentaires seulement »** ne corrige quasiment rien — tout est "
-    "surligné/commenté en langage courant, à valider par une personne (pensé pour quelqu'un qui "
-    "ne travaille pas avec ce fichier au quotidien)."
+    "surligné/commenté en langage courant, à valider par une personne."
 )
 col_btn_complet, col_btn_commentaires = st.columns(2)
 lancer_complet = col_btn_complet.button(
