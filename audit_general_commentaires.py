@@ -108,6 +108,13 @@ motor.COULEUR_COPIE_POSSIBLE = "FFFF6969"
 # qui parlent toutes de cohérence/changement, jamais de complétude. Les champs optionnels vides
 # réutilisent le gris existant (COULEUR_A_VERIFIER), déjà "cellule vide" partout ailleurs.
 COULEUR_CHAMP_OBLIGATOIRE_VIDE = "FFFABF8F"
+# Prix à 0€ (règle n°46) : distinct du gris générique (COULEUR_A_VERIFIER, "cellule vide/aucune
+# conversion fiable", utilisé partout ailleurs) pour qu'un prix à 0€ reste repérable à l'œil
+# parmi toutes les autres cellules grises de la feuille — mais reste discret (couleur pâle,
+# pas aussi voyante que l'orange "champ obligatoire" ou le rose "ratio suspect"), car c'est une
+# donnée probablement manquante plutôt qu'une vraie incohérence à corriger. Demandé par
+# l'utilisateur le 2026-11-10.
+COULEUR_PRIX_ZERO = "FFD9D2E9"
 
 motor.PACKAGE_TYPES = tuple(MOTS_CONTENANT)
 # Un ou plusieurs mots qualificatifs (matière, ou...) insérés entre le récipient et sa
@@ -2552,13 +2559,13 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
     # pretraitement_a_formater.py plutôt que laissés vides).
     prix_zero = (prix_ref == 0) or (prix_cmd == 0)
     if prix_ref == 0:
-        marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]), motor.COULEUR_A_VERIFIER,
+        marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]), COULEUR_PRIX_ZERO,
                fournisseur["nom"],
                "Un prix de 0€ est impossible pour un article réellement vendu — vérifier la "
                "saisie (prix non communiqué par le fournisseur, ou erreur d'export).")
         total += 1
     if prix_cmd == 0:
-        marque(ws.cell(row=ligne, column=fournisseur["prix_cmd"]), motor.COULEUR_A_VERIFIER,
+        marque(ws.cell(row=ligne, column=fournisseur["prix_cmd"]), COULEUR_PRIX_ZERO,
                fournisseur["nom"],
                "Un prix de 0€ est impossible pour un article réellement vendu — vérifier la "
                "saisie (prix non communiqué par le fournisseur, ou erreur d'export).")

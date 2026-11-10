@@ -596,6 +596,17 @@ unités/prix quand le prix de départ est déjà 0. Trouvé sur le fichier Vival
 fournisseur plutôt que des cases vides) — n'affecte aucun des 7 fichiers de référence (aucun
 prix à 0€ exact dedans), donc aucun total de non-régression à mettre à jour.
 
+**Mise à jour (2026-11-10, couleur)** : d'abord posée avec le gris générique
+(`COULEUR_A_VERIFIER`, "FFBFBFBF" — utilisé partout ailleurs pour "cellule vide/aucune
+conversion fiable"), ce qui rendait l'alarme indiscernable des dizaines d'autres cellules
+grises d'une feuille sans rapport avec un prix à 0€. Remplacée par une couleur dédiée
+(`COULEUR_PRIX_ZERO`, "FFD9D2E9", un lavande pâle) : repérable à l'œil, mais volontairement
+discrète (pas aussi voyante que l'orange "champ obligatoire" ou le rose "ratio suspect"),
+puisqu'il s'agit probablement d'une donnée manquante plutôt que d'une vraie incohérence à
+corriger — demandé explicitement par l'utilisateur, qui a aussi proposé l'option inverse
+(garder le gris et changer tous les autres usages) ; option écartée ici pour ne pas toucher à
+la dizaine d'autres cas qui réutilisent légitimement ce gris générique ailleurs dans le code.
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
