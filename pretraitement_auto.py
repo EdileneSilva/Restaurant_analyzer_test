@@ -29,6 +29,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from copy import copy
 
 import openpyxl
 
@@ -166,6 +167,36 @@ def complete_colonnes_canonique_incomplet(chemin_source, chemin_sortie):
         ws.insert_cols(col_insertion)
         ws.cell(row=ligne_entete, column=col_insertion).value = (
             "Nombre de pièces dans conditionnement")
+        # ws.insert_cols ne copie aucun style dans la colonne vide créée (contrairement à ce que
+        # dit la docstring ci-dessus, qui ne parlait QUE du contenu/style des colonnes SUIVANTES,
+        # décalées) : trouvé le 2026-11-10 par l'utilisateur sur un fichier AGAPE traité (police,
+        # fond et bordures manquants sur toute la colonne F). Vérifié sur le modèle de référence
+        # ("2026 09 22 Base article groupement 1.xlsx", où cette colonne existe déjà) : son style
+        # (en-tête ET données) est identique à celui de la colonne juste à gauche ("Poids à
+        # l'unité de référence") sur chaque ligne — donc on le reproduit en copiant ce style
+        # depuis la colonne immédiatement à gauche (non touchée par l'insertion), ligne par ligne.
+        # Exception trouvée en validant sur les 6 fichiers AGAPE : sur ces fichiers précis, cette
+        # colonne "Poids" a elle-même perdu sa bordure sur les lignes de données (contrairement à
+        # toutes les colonnes autour, qui l'ont) — un défaut déjà présent dans le fichier source,
+        # pas introduit ici. Copier aveuglément aurait reproduit ce défaut sur la nouvelle colonne
+        # au lieu de l'habillage "comme le reste du document" qu'elle doit avoir : si la bordure de
+        # la colonne modèle est entièrement absente sur une ligne donnée, on se rabat sur la
+        # bordure de la colonne encore à gauche ("Unité de référence"), qui l'a de façon fiable.
+        col_modele = col_insertion - 1
+        col_secours = col_modele - 1 if col_modele > 1 else None
+        for r in range(ligne_entete, ws.max_row + 1):
+            cel_modele = ws.cell(row=r, column=col_modele)
+            cel_neuve = ws.cell(row=r, column=col_insertion)
+            cel_neuve.font = copy(cel_modele.font)
+            cel_neuve.fill = copy(cel_modele.fill)
+            cel_neuve.alignment = copy(cel_modele.alignment)
+            cel_neuve.number_format = cel_modele.number_format
+            bordure = cel_modele.border
+            if col_secours and not any((
+                    bordure.left.style, bordure.right.style,
+                    bordure.top.style, bordure.bottom.style)):
+                bordure = ws.cell(row=r, column=col_secours).border
+            cel_neuve.border = copy(bordure)
         if not premiere_feuille_traitee:
             if col_designation and col_designation >= col_insertion:
                 col_designation += 1  # décalée par l'insertion ci-dessus

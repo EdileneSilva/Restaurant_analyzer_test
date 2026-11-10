@@ -892,6 +892,40 @@ correction, Poids à l'unité de référence = 0,053 kg, Nombre de pièces = 60,
 suggéré avec confiance = 26,28 ÷ 60 = 0,44€. Aucun changement de total de non-régression sur
 les 7 fichiers de référence (aucun n'a ce motif "contenant seul sans poids").
 
+### 57. Colonne insérée par la règle n°55 sans aucune mise en forme
+
+L'utilisateur a relu un fichier AGAPE transformé et signalé que la colonne "Nombre de pièces
+dans conditionnement", insérée par `complete_colonnes_canonique_incomplet()` (règle n°55), avait
+une police/un fond ne correspondant pas au format canonique, et surtout aucune bordure — alors
+que tout le reste du document en a. Cause : `ws.insert_cols()` décale bien le CONTENU et le
+STYLE des colonnes suivantes (comme documenté règle n°55), mais la colonne vide qu'il crée à
+l'emplacement d'insertion, elle, n'hérite d'aucun style — ni de celui d'une colonne voisine ni
+d'un style par défaut cohérent avec le document. Ce manque n'avait pas été vérifié visuellement
+lors de la validation de la règle n°55 (seuls le contenu et le décalage des autres colonnes
+avaient été vérifiés).
+
+Corrigé en copiant explicitement, ligne par ligne (en-tête inclus), le style (police, fond,
+bordure, alignement, format de nombre) de la colonne juste à gauche ("Poids à l'unité de
+référence", non touchée par l'insertion) vers la nouvelle colonne — confirmé identique au
+modèle de référence (`2026 09 22 Base article groupement 1.xlsx`, qui a déjà cette colonne) :
+même police/fond/bordure que "Poids..." sur chaque ligne, en-tête comme données.
+
+**Exception trouvée en validant sur les 6 fichiers AGAPE réels** : sur ces fichiers précis, la
+colonne "Poids de la PC (si Unité de référence = PC)" a elle-même perdu sa bordure sur TOUTES
+les lignes de données — un défaut déjà présent dans le fichier source (visible en comparant
+avec les colonnes autour, qui ont toutes une bordure fine complète), pas introduit par cet
+outil. Copier aveuglément son style aurait donc reproduit ce défaut sur la colonne neuve, au
+lieu de l'habillage cohérent avec le reste du document que l'utilisateur demandait. Repli
+ajouté : si la bordure de la colonne modèle est entièrement absente sur une ligne donnée, la
+bordure est reprise sur la colonne encore à gauche ("Unité de référence"), qui l'a de façon
+fiable sur ce fichier.
+
+Validé sur les 6 fichiers `a_inspecter/Base IANOR AGAPE 16 ...` (toujours le même nombre de
+lignes qu'avant ce correctif — aucune régression de contenu) : la colonne insérée a désormais
+une bordure fine complète sur toutes les lignes de données, et la même police rouge grasse +
+fond que les colonnes voisines sur l'en-tête. Aucun changement de total de non-régression sur
+les 7 fichiers de référence (chemin de code non concerné, déjà complets).
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article

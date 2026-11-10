@@ -121,3 +121,12 @@ a choisi d'en faire un statut externe à part entière plutôt qu'une simple not
   `localise_feuille_et_colonnes` (`audit_general.py`) les repère par texte d'en-tête, jamais
   par position fixe — un décalage de colonnes (qu'il soit dû à l'absence d'origine, ou à
   l'insertion qui la corrige) ne perturbe donc jamais la lecture des autres champs.
+- **Mise en forme de la colonne insérée (2026-11-10, même jour)** : `ws.insert_cols` ne donne
+  aucun style à la colonne vide qu'il crée — signalé par l'utilisateur après relecture visuelle
+  d'un fichier AGAPE transformé (police/fond/bordure ne correspondant pas au reste du document).
+  `complete_colonnes_canonique_incomplet()` copie désormais explicitement le style de la colonne
+  "Poids à l'unité de référence" (juste à gauche, non touchée par l'insertion) vers la nouvelle
+  colonne, ligne par ligne — avec un repli sur la colonne encore à gauche pour la bordure
+  spécifiquement, quand celle de "Poids" est elle-même dépourvue de bordure sur une ligne donnée
+  (défaut déjà présent dans les fichiers AGAPE source sur cette colonne précise, pas introduit
+  ici). Voir `catalogue_erreurs.md`, règle n°57.
