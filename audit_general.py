@@ -2169,6 +2169,19 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
         return True, None
     if cat in ("kg", "l"):
         return True, None
+    # Faute de frappe sur le code de base lui-même (ex: 'plitre' pour 'litre', 'kgg' pour
+    # 'kg') : sans ce contrôle, une Unité de commande ainsi mal orthographiée ne correspond à
+    # aucune catégorie connue, mais si le Conditionnement ne nomme non plus aucun mot de
+    # récipient (ex: '1 litre', un simple nombre+unité, pas 'carton'/'pot'...), la suite de
+    # cette fonction ne trouve rien à comparer et conclut à tort que tout est cohérent — la
+    # faute de frappe passe alors totalement inaperçue, sans aucun signalement. Trouvé par
+    # l'utilisateur le 2026-11-10 sur Base IANOR AGAPE 16 Produits laitiers, ligne 35
+    # ("plitre" en Unité de commande, Conditionnement "1 litre", rien n'était signalé).
+    for base in ("kg", "l", "litre", "kilo", "kilogramme"):
+        if _distance_un(cat, base):
+            return False, (
+                f"Unité de commande ('{unite_cmd}') ressemble à une faute de frappe de "
+                f"'{base.upper()}' — vérifier l'orthographe.")
     if re.match(r"^\d+\s*pi[eè]ces?$", cat):
         return True, None
     if cat == "lot" and re.search(r"\blots?\b", cond):

@@ -799,6 +799,25 @@ liste équivalente n'existe pour l'ensemble des ~100 départements français, do
 réécriture automatique ici, seulement le signalement explicite. Aucun changement de total de
 non-régression sur les 7 fichiers de référence (texte du message changé, pas son déclenchement).
 
+### 54. Bug corrigé — faute de frappe sur "kg"/"litre" en Unité de commande jamais détectée
+
+`verifie_unite_commande_etendue` ne compare l'Unité de commande qu'à un mot de récipient
+trouvé dans le Conditionnement/la Désignation (ex: "carton", "pot"...) ; quand ni l'un ni
+l'autre n'en nomme aucun (ex: Conditionnement = "1 litre", un simple nombre + unité, sans
+récipient), la fonction n'a rien à comparer et conclut par défaut que tout est cohérent — même
+si l'Unité de commande elle-même est une faute de frappe pure et simple du code de base (ex:
+"plitre" pour "litre"), ça passait totalement inaperçu, sans le moindre signalement. Trouvé
+par l'utilisateur sur `Base IANOR AGAPE 16 Produits laitiers.xlsx`, ligne 35 ("plitre" en
+Unité de commande, Conditionnement "1 litre", Unité de référence "litre" — rien n'était
+signalé alors que l'Unité de commande ne veut rien dire).
+
+Corrigé en ajoutant un contrôle dédié (les deux moteurs), réutilisant `_distance_un` (déjà
+utilisée pour les fautes de frappe de mots de récipient, ex: "BARQUETE") : si l'Unité de
+commande est à une seule lettre près de "kg"/"l"/"litre"/"kilo"/"kilogramme", elle est
+signalée explicitement ("ressemble à une faute de frappe de 'LITRE'..."), avant même de
+chercher un mot de récipient à comparer. Aucun changement de total de non-régression sur les 7
+fichiers de référence (aucune Unité de commande de ce type n'y est mal orthographiée).
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
