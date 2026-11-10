@@ -317,6 +317,28 @@ RE_CONTENANT_TRIPLE_IMBRIQUE = re.compile(
 # individuelle, comparable entre fournisseurs quel que soit le conditionnement) soit confirmée.
 RE_CONTENANT_SEUL_SANS_POIDS = re.compile(rf"^\s*({_MOTS_REGEX})s?\s+de\s+(\d+)\s*$", re.I)
 
+# Calibre d'œuf écrit en fourchette de grammes dans la désignation (ex: "53/63" = 53 à 63 g,
+# catégorie M) — confirmé par l'utilisateur le 2026-11-10 : ce format "N/M" n'apparaît QUE pour
+# les œufs dans les fichiers vus jusqu'ici, jamais ailleurs (où "N/M" veut dire tout autre
+# chose, ex: un format de boîte de conserve "BOITE 5/1") — d'où la restriction stricte aux
+# désignations qui mentionnent "œuf"/"oeuf", pour ne jamais confondre les deux.
+RE_OEUF = re.compile(r"\b(?:oeufs?|œufs?)\b", re.I)
+RE_CALIBRE_OEUF = re.compile(r"\b(\d{2,3})\s*/\s*(\d{2,3})\b")
+
+
+def _poids_calibre_oeuf(designation):
+    """Poids à l'unité de référence déduit d'un calibre d'œuf écrit en fourchette dans la
+    désignation (ex: "53/63"). Renvoie (poids_kg, borne_basse_texte, borne_haute_texte) ou
+    None. Retient la BORNE BASSE (poids minimum garanti pour ce calibre) — jamais une moyenne
+    ni une estimation inventée : la réglementation des calibres d'œufs garantit un poids
+    MINIMUM par catégorie, c'est la seule valeur dont on soit sûr sans peser l'œuf soi-même."""
+    if not designation or not RE_OEUF.search(str(designation)):
+        return None
+    m = RE_CALIBRE_OEUF.search(str(designation))
+    if not m:
+        return None
+    return round(int(m.group(1)) / 1000, 3), m.group(1), m.group(2)
+
 # "2 PIECES DE 2 KG" (= 4 kg au total) : aucun récipient n'est nommé, la ligne commence
 # directement par "N PIECES DE Qté" — quand l'unité de référence est au kg/L, le nombre de
 # pièces sert de multiplicateur du poids (contrairement à piece_carton_candidats(), qui
@@ -1048,24 +1070,61 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
         r.nouveau_f = n
         r.commentaire_f = f"Renseigné à {n} : nombre de pièces dans ce '{mot_contenant}'."
         r.contenant_imbrique_confirme = True  # pour valider l'unité de commande CORRIGÉE, pas l'ancienne
+
+        # Poids à l'unité de référence déduit d'un calibre d'œuf (ex: "53/63" dans la
+        # désignation) quand il est encore vide — seulement pour les œufs (voir
+        # _poids_calibre_oeuf), jamais ailleurs. Demandé par l'utilisateur le 2026-11-10.
+        if not poids_ref:
+            resultat_calibre = _poids_calibre_oeuf(designation)
+            if resultat_calibre:
+                poids_calibre, borne_basse, borne_haute = resultat_calibre
+                r.nouveau_e = poids_calibre
+                r.explication_e = (
+                    f"Poids à l'unité de référence renseigné à {poids_calibre} kg : la "
+                    f"désignation ('{designation}') indique un calibre {borne_basse}/"
+                    f"{borne_haute} g — borne basse retenue ({borne_basse} g), le poids "
+                    "minimum garanti pour ce calibre d'œuf.")
+
         if round(prix_ref, 4) != prix_par_piece:
-            r.couleur_k = motor.COULEUR_RATIO_SUSPECT
             r.nouveau_k = prix_par_piece
-            # Deux lectures possibles, on ne sait pas laquelle est la bonne (ni quel champ a
-            # l'erreur) : soit le Prix de commande couvre les N pièces et le Prix de référence
-            # doit être divisé par N, soit le Prix de référence est déjà correct par pièce et
-            # c'est le Prix de commande qui devrait être multiplié par N — demandé par
-            # l'utilisateur le 2026-11-10, pour ne pas affirmer une seule direction de
-            # correction sans savoir laquelle des deux valeurs est fautive.
-            r.commentaire_k = (
-                f"Le Prix de référence actuel ({formate_prix(prix_ref)}€) ne correspond pas au "
-                f"Prix de commande ({formate_prix(prix_cmd)}€) divisé par le nombre de pièces "
-                f"({n}). Deux lectures possibles, impossible de savoir laquelle est la bonne : "
-                f"soit le Prix de référence devrait être {formate_prix(prix_cmd)}€ ÷ {n} = "
-                f"{formate_prix(prix_par_piece)}€ (si {formate_prix(prix_cmd)}€ couvre les {n} "
-                f"pièces), soit le Prix de commande devrait être {formate_prix(prix_ref)}€ × "
-                f"{n} = {formate_prix(prix_ref * n)}€ (si {formate_prix(prix_ref)}€ est déjà le "
-                "bon prix par pièce) — à vérifier, rien n'est modifié automatiquement.")
+            # L'unité de commande D'ORIGINE (avant toute correction ci-dessus) confirme-t-elle
+            # que le prix de commande est bien celui du CONTENANT ENTIER, pas d'une pièce ? Si
+            # elle était déjà identique à l'unité de référence d'origine (ex: "plateau de 60"
+            # des deux côtés), la personne qui a rempli le fichier a donné le même prix pour le
+            # même contenant décrit des deux côtés — ce n'est plus une supposition parmi deux,
+            # c'est confirmé : le Prix de référence doit refléter le prix par pièce. Sinon,
+            # direction incertaine comme avant (voir le commentaire plus bas). Dans les deux
+            # cas, le prix n'est JAMAIS écrit automatiquement (règle n°22) — seule la couleur/
+            # le message change pour refléter le niveau de confiance. Demandé par l'utilisateur
+            # le 2026-11-10, vu sur Base IANOR AGAPE 16 Produits laitiers, ligne 104 (œufs,
+            # "plateau de 60" des deux côtés, prix identiques).
+            if unite_cmd and motor.normalise_texte(unite_cmd) == motor.normalise_texte(unite_ref):
+                r.couleur_k = motor.COULEUR_UNITE_TRANSFORMEE
+                r.commentaire_k = (
+                    f"Prix de référence suggéré avec confiance : {formate_prix(prix_cmd)}€ ÷ "
+                    f"{n} = {formate_prix(prix_par_piece)}€ — confirmé par l'Unité de commande "
+                    f"d'origine ('{unite_cmd}'), identique à l'Unité de référence d'origine : "
+                    f"le même prix a été donné pour le même contenant décrit des deux côtés, "
+                    "donc c'est bien le prix du contenant ENTIER, pas d'une pièce individuelle "
+                    "— à vérifier avant de changer, rien n'est modifié automatiquement.")
+            else:
+                r.couleur_k = motor.COULEUR_RATIO_SUSPECT
+                # Deux lectures possibles, on ne sait pas laquelle est la bonne (ni quel champ
+                # a l'erreur) : soit le Prix de commande couvre les N pièces et le Prix de
+                # référence doit être divisé par N, soit le Prix de référence est déjà correct
+                # par pièce et c'est le Prix de commande qui devrait être multiplié par N —
+                # demandé par l'utilisateur le 2026-11-10, pour ne pas affirmer une seule
+                # direction de correction sans savoir laquelle des deux valeurs est fautive.
+                r.commentaire_k = (
+                    f"Le Prix de référence actuel ({formate_prix(prix_ref)}€) ne correspond pas "
+                    f"au Prix de commande ({formate_prix(prix_cmd)}€) divisé par le nombre de "
+                    f"pièces ({n}). Deux lectures possibles, impossible de savoir laquelle est "
+                    f"la bonne : soit le Prix de référence devrait être "
+                    f"{formate_prix(prix_cmd)}€ ÷ {n} = {formate_prix(prix_par_piece)}€ (si "
+                    f"{formate_prix(prix_cmd)}€ couvre les {n} pièces), soit le Prix de "
+                    f"commande devrait être {formate_prix(prix_ref)}€ × {n} = "
+                    f"{formate_prix(prix_ref * n)}€ (si {formate_prix(prix_ref)}€ est déjà le "
+                    "bon prix par pièce) — à vérifier, rien n'est modifié automatiquement.")
         return r
 
     resultat_pieces = piece_carton_candidats(unite_ref, conditionnement)

@@ -856,6 +856,42 @@ non-régression sur les 7 fichiers `pret_pour_audit/` de référence (déjà com
 concernés par ce chemin de code) ; validé sur les 6 fichiers `Base IANOR AGAPE 16` de
 `a_inspecter/`.
 
+### 56. Cas "contenant seul sans poids" (œufs) affiné : poids par calibre + prix confirmé avec confiance
+
+Suite directe de la règle n°55 (colonne "Nombre de pièces" désormais réellement disponible) :
+l'utilisateur a demandé pourquoi la case "Nombre de pièces" restait vide pour les œufs
+("plateau de 60") et pourquoi le Prix de référence suggéré ("Le Prix de référence... Deux
+lectures possibles...") restait présenté comme une devinette à 50/50. Discussion menée avant
+d'implémenter (demandé explicitement par l'utilisateur) :
+
+1. **"Nombre de pièces" (déjà résolu par la règle n°55)** : le mécanisme (`resultat.nouveau_f`
+   → `col_nb_pieces`) existait déjà dans le code (branche "contenant seul sans poids", ex:
+   "plateau de 60") — il manquait juste la colonne réelle pour écrire dedans. Rien à changer
+   ici, confirmé par un test de bout en bout (colonne "Nombre de pièces" remplie à 60).
+2. **Prix de référence, direction confirmée plutôt qu'incertaine** : contrairement au cas
+   générique de la règle n°47 (direction vraiment inconnue), ici l'Unité de commande D'ORIGINE
+   (avant toute correction) disait déjà exactement la même chose que l'Unité de référence
+   d'origine ("plateau de 60" des deux côtés, même prix) — la personne qui a rempli le fichier
+   a donc confirmé elle-même, avec le même prix pour le même contenant décrit deux fois, que ce
+   prix est bien celui du contenant ENTIER. Le message passe d'un "deux lectures possibles" à
+   une suggestion confiante ("confirmé par l'Unité de commande d'origine..."), avec une couleur
+   différente (bleu "changement confirmé" au lieu de rose "ratio suspect") — mais le prix de
+   référence n'est **toujours jamais écrit automatiquement** (règle n°22), seule la formulation
+   change.
+3. **Poids à l'unité de référence, calibre d'œuf** : la désignation donne souvent un calibre en
+   grammes sous forme de fourchette (ex: "53/63" = 53 à 63 g) plutôt qu'un poids unique.
+   Nouvelle fonction `_poids_calibre_oeuf()`, strictement réservée aux désignations mentionnant
+   "œuf"/"oeuf" (confirmé par l'utilisateur : ce format "N/M" n'apparaît QUE pour les œufs dans
+   les fichiers vus jusqu'ici — ailleurs, "N/M" veut dire autre chose, ex: "BOITE 5/1") : retient
+   la BORNE BASSE (53 g ici), le poids minimum garanti pour ce calibre — jamais une moyenne ni
+   une estimation inventée.
+
+Trouvé par l'utilisateur sur `Base IANOR AGAPE 16 Produits laitiers.xlsx`, ligne 104 ("œufs BIO
+frais de poule 53/63 cat.A", "plateau de 60" des deux côtés, 26,28€ des deux côtés) — après
+correction, Poids à l'unité de référence = 0,053 kg, Nombre de pièces = 60, Prix de référence
+suggéré avec confiance = 26,28 ÷ 60 = 0,44€. Aucun changement de total de non-régression sur
+les 7 fichiers de référence (aucun n'a ce motif "contenant seul sans poids").
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
