@@ -48,11 +48,13 @@ fournisseurs qui ne sont pas déjà dans ce format.
 - `pretraitement_auto.py` — point d'entrée unique utilisé par `app.py` : détecte
   automatiquement le format d'un fichier déposé (canonique / REGAL / GRADA / une des 5
   familles de `a_formater/` / `.xls` ancien à convertir / non reconnu) et applique le bon
-  traitement. `detecte_statut()` expose le vocabulaire US-06 (`deja_au_format`/`formatable`/
-  `non_formatable`) ; `transforme_automatiquement()` renvoie en plus une liste de causes
+  traitement. `detecte_statut()` expose le vocabulaire US-06 (`deja_au_format`/`incomplet`/
+  `formatable`/`non_formatable` — `incomplet` : canonique mais auquel il manque une colonne
+  structurelle, ex: `Base IANOR AGAPE 16 ...` sans "Nombre de pièces dans conditionnement",
+  ajouté le 2026-11-10) ; `transforme_automatiquement()` renvoie en plus une liste de causes
   structurées (`{code, message, onglet, colonne, cellule}`) quand le résultat est
-  `non_formatable` — voir US-06 dans `suivi_user_stories_01_08.md` et
-  `detection_format_causes.md`.
+  `non_formatable`, ou une cause informative non bloquante pour `incomplet` — voir US-06 dans
+  `suivi_user_stories_01_08.md` et `detection_format_causes.md`.
 - `pretraitement_a_formater.py` — transforme les fichiers bruts de `a_formater/` qui ne sont
   pas déjà pris en charge par les deux scripts ci-dessus (familles BPU DQE, Passion Froid,
   Episaveurs, BPUR FRESCA, MP ARDECHE 24). Utilisable en CLI (`python
@@ -126,7 +128,7 @@ Le détail fichier par fichier (source, date de réception, statut, anonymisatio
   US-01 à US-08 (critères d'acceptation un par un : fait / partiel / pas encore fait), avec
   renvoi vers le document ou la ligne de code concerné pour chacun.
 - [`detection_format_causes.md`](detection_format_causes.md) — US-06 : vocabulaire de statut
-  (`deja_au_format`/`formatable`/`non_formatable`) et catalogue de causes, à partir des échecs
+  (`deja_au_format`/`incomplet`/`formatable`/`non_formatable`) et catalogue de causes, à partir des échecs
   déjà codés dans les scripts de prétraitement — implémenté le 2026-10-30 (`causes_format.py`).
 - [`test_manuel_streamlit.md`](test_manuel_streamlit.md) — guide de test MANUEL (US-08.3/US-05.3 :
   validation par le métier sur des fichiers réels, jamais tracée jusqu'ici) : user story +

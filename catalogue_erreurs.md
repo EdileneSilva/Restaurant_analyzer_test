@@ -818,6 +818,30 @@ signalée explicitement ("ressemble à une faute de frappe de 'LITRE'..."), avan
 chercher un mot de récipient à comparer. Aucun changement de total de non-régression sur les 7
 fichiers de référence (aucune Unité de commande de ce type n'y est mal orthographiée).
 
+### 55. Nouveau statut `incomplet` — fichier canonique auquel il manque une colonne structurelle
+
+`pretraitement_auto.detecte_format()` considérait un fichier "canonique" dès qu'il trouvait
+les deux en-têtes ancres ("désignation de l'article" + "unité de référence"), sans jamais
+vérifier si les AUTRES colonnes du bloc commun (format_cible.md) existent vraiment. Les 6
+fichiers `Base IANOR AGAPE 16 ...` n'ont pas de colonne "Nombre de pièces dans
+conditionnement" — ils étaient donc traités en silence exactement comme un fichier `deja_au_
+format` complet, sans que la personne qui dépose le fichier en soit informée. Demandé par
+l'utilisateur le 2026-11-10 (voir aussi `detection_format_causes.md`, section 4, et
+`format_cible.md`, "Note technique" : ce même écart y était déjà documenté comme "à corriger
+séparément" depuis le 2026-10-30, jamais traité jusqu'ici).
+
+Nouveau 4e statut externe `incomplet` (`canonique_incomplet` en interne) : un fichier
+canonique SANS cette colonne reçoit ce statut plutôt que `deja_au_format`. Il reste utilisable
+tel quel pour l'audit (`transforme_automatiquement` le traite exactement comme `canonique`,
+rien n'est transformé) — la lecture des autres colonnes se fait par texte d'en-tête, pas par
+position fixe, donc l'absence de cette colonne ne décale jamais les suivantes ; le seul effet
+réel est que `col_nb_pieces` reste `None` pour ces fichiers (fonctionnalité simplement
+indisponible, pas une corruption). `audit_pipeline.py` affiche désormais une note explicite
+("reconnu comme format canonique, mais incomplet : ...") plutôt que de rester silencieux.
+Aucun changement de total de non-régression sur les 7 fichiers `pret_pour_audit/` de référence
+(tous ont la colonne complète) ; validé sur les 6 fichiers `Base IANOR AGAPE 16` de
+`a_inspecter/`, qui basculent bien de `deja_au_format` à `incomplet`.
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article

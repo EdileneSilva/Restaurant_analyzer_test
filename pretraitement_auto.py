@@ -107,6 +107,20 @@ def _ligne_entete_canonique(ws):
     return None
 
 
+def _colonne_nb_pieces_absente(ws, ligne_entete):
+    """Vrai si la colonne "Nombre de pièces dans conditionnement" (bloc commun, voir
+    format_cible.md) n'est pas trouvée sur la ligne d'en-tête déjà repérée par
+    _ligne_entete_canonique. Connu comme manquant dans la famille "Base IANOR AGAPE 16"
+    (confirmé sur les 6 fichiers de a_inspecter/ le 2026-11-10) — un fichier canonique sans
+    cette colonne reste utilisable tel quel pour l'audit (la colonne est optionnelle côté
+    contenu, voir format_cible.md ligne 32 ; et sa lecture se fait par texte d'en-tête, pas par
+    position fixe, donc son absence ne décale aucune autre colonne), mais mérite un
+    avertissement plutôt qu'un silence total."""
+    textes = [pt._normalise(ws.cell(row=ligne_entete, column=c).value)
+              for c in range(1, ws.max_column + 1)]
+    return not any("nombre de" in t and "pieces" in t for t in textes)
+
+
 def _est_regal(ws):
     textes_entete = {pt._normalise(ws.cell(row=1, column=c).value) for c in range(1, ws.max_column + 1)}
     return "designation produit" in textes_entete and "cond rendu dans magento" in textes_entete
@@ -121,7 +135,16 @@ def _feuille_grada(ws):
 
 
 def detecte_format(chemin_source, nom_fichier=None):
-    """Renvoie 'canonique', 'regal', 'grada', 'a_formater' ou None (format non reconnu).
+    """Renvoie 'canonique', 'canonique_incomplet', 'regal', 'grada', 'a_formater' ou None
+    (format non reconnu).
+
+    'canonique_incomplet' : les deux en-têtes ancres sont bien là (Désignation de l'article +
+    Unité de référence), mais une colonne du bloc commun attendue par format_cible.md manque
+    structurellement (pour l'instant, seule "Nombre de pièces dans conditionnement" est
+    connue comme manquante, famille "Base IANOR AGAPE 16") — le fichier reste utilisable tel
+    quel pour l'audit (voir transforme_automatiquement), juste signalé différemment de
+    'canonique' pour ne pas prétendre silencieusement qu'il est complet. Demandé par
+    l'utilisateur le 2026-11-10.
 
     `nom_fichier` sert UNIQUEMENT à reconnaître une des 5 familles de a_formater/ (BPU DQE,
     Passion Froid, Episaveurs, BPUR FRESCA, MP ARDECHE 24) : contrairement à REGAL/GRADA/
@@ -130,7 +153,10 @@ def detecte_format(chemin_source, nom_fichier=None):
     3 des 5 n'ont aucune validation de colonnes par texte, lire par position fixe)."""
     wb = openpyxl.load_workbook(chemin_source, data_only=True)
     for ws in wb.worksheets:
-        if _ligne_entete_canonique(ws):
+        ligne_entete = _ligne_entete_canonique(ws)
+        if ligne_entete:
+            if _colonne_nb_pieces_absente(ws, ligne_entete):
+                return "canonique_incomplet"
             return "canonique"
     for ws in wb.worksheets:
         if _est_regal(ws):
@@ -147,9 +173,13 @@ def detecte_format(chemin_source, nom_fichier=None):
 # — construit au-dessus de detecte_format, qui garde son vocabulaire interne plus détaillé
 # (nécessaire pour savoir QUEL traitement appeler). 'regal'/'grada'/'a_formater' sont bien les
 # trois valeurs regroupées sous 'formatable' que le backlog demande comme statut unique, pas
-# trois statuts distincts exposés tels quels à l'extérieur.
+# trois statuts distincts exposés tels quels à l'extérieur. 'incomplet' est un 4e statut
+# ajouté le 2026-11-10 (demandé par l'utilisateur) : un fichier canonique auquel il manque une
+# colonne structurelle (voir detecte_format) reste utilisable pour l'audit, mais ce n'est plus
+# honnête de le confondre avec 'deja_au_format' (qui sous-entend "complet").
 _STATUT_EXTERNE = {
     "canonique": "deja_au_format",
+    "canonique_incomplet": "incomplet",
     "regal": "formatable",
     "grada": "formatable",
     "a_formater": "formatable",
@@ -271,11 +301,16 @@ def transforme_automatiquement(chemin_source, chemin_sortie, nom_fichier=None):
     le fichier déposé peut être utilisé tel quel pour l'audit) ou quand le
     format n'a pas été reconnu (rien n'a été écrit dans chemin_sortie).
     `causes` (US-06.2/.3) est une liste de dicts {code, message, onglet,
-    colonne, cellule} — non vide seulement quand format_detecte et nb_lignes
-    valent tous les deux None (non_formatable) : soit le format n'a été
-    reconnu par aucune des 4 familles, soit il a été reconnu mais la
-    transformation a quand même échoué sur une cause structurée (en-tête
-    partiellement modifié, colonne manquante...) au lieu de planter.
+    colonne, cellule}. Non vide quand format_detecte et nb_lignes valent
+    tous les deux None (non_formatable) : soit le format n'a été reconnu par
+    aucune des 4 familles, soit il a été reconnu mais la transformation a
+    quand même échoué sur une cause structurée (en-tête partiellement
+    modifié, colonne manquante...) au lieu de planter. Également non vide,
+    mais de façon NON bloquante cette fois (format_detecte et nb_lignes
+    restent renseignés normalement), quand format_detecte vaut
+    'canonique_incomplet' : une seule cause informative, "COLONNE_OPTIONNELLE_
+    ABSENTE", qui ne fait que signaler une colonne structurelle manquante
+    mais utilisable telle quelle (voir detecte_format).
 
     chemin_source accepte aussi bien un chemin sur disque qu'un fichier en
     mémoire (BytesIO) ; dans ce dernier cas, nom_fichier sert à nommer le
@@ -305,7 +340,20 @@ def transforme_automatiquement(chemin_source, chemin_sortie, nom_fichier=None):
 
     format_detecte = detecte_format(chemin_source, nom_fichier=nom_fichier_registre)
 
-    if format_detecte == "canonique":
+    if format_detecte in ("canonique", "canonique_incomplet"):
+        # 'canonique_incomplet' (voir detecte_format) : rien à transformer, le fichier reste
+        # utilisable tel quel pour l'audit exactement comme 'canonique' — seule différence,
+        # une cause INFORMATIVE (pas bloquante : nb_lignes reste None/0, pas None/None comme
+        # pour un vrai échec) signale la colonne structurelle manquante, pour que l'appelant
+        # (audit_pipeline.py) puisse en informer la personne plutôt que de rester silencieux.
+        causes_info = [] if format_detecte == "canonique" else [{
+            "code": "COLONNE_OPTIONNELLE_ABSENTE",
+            "message": (
+                "Colonne « Nombre de pièces dans conditionnement » absente de l'en-tête — ce "
+                "champ restera vide pour ce fichier, le reste de l'audit fonctionne normalement."
+            ),
+            "onglet": None, "colonne": "Nombre de pièces dans conditionnement", "cellule": None,
+        }]
         if foi_convertido_de_xls:
             _reseek(chemin_source)
             conteudo = chemin_source.read()
@@ -314,8 +362,8 @@ def transforme_automatiquement(chemin_source, chemin_sortie, nom_fichier=None):
             else:
                 with open(chemin_sortie, "wb") as f:
                     f.write(conteudo)
-            return "canonique", 0, []
-        return "canonique", None, []
+            return format_detecte, 0, causes_info
+        return format_detecte, None, causes_info
     if format_detecte == "regal":
         _reseek(chemin_source)
         try:

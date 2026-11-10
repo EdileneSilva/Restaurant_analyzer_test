@@ -114,8 +114,12 @@ script** (`catalogue_erreurs.md`, règle n°33) :
 
 ## Note technique (hors TT-04, à traiter séparément)
 
-`pretraitement_auto.detecte_format` considère un fichier "canonique" dès qu'il trouve les
-en-têtes "désignation de l'article" + "unité de référence" en ligne 1-5, sans vérifier le
-nombre de colonnes ni leur contenu exact. Les fichiers `Base IANOR AGAPE 16 ...` passent donc
-ce test alors qu'il leur manque la colonne 6 — à corriger dans un ticket à part (détection
-plus stricte, ou étape de complétion automatique de cette colonne).
+**Résolu le 2026-11-10** (voir `catalogue_erreurs.md`, règle n°55) : `pretraitement_auto.
+detecte_format` considérait un fichier "canonique" dès qu'il trouvait les en-têtes
+"désignation de l'article" + "unité de référence" en ligne 1-5, sans vérifier le nombre de
+colonnes ni leur contenu exact — les fichiers `Base IANOR AGAPE 16 ...` passaient donc ce test
+alors qu'il leur manque la colonne 6, sans que personne n'en soit informé. Un 4e statut
+externe, `incomplet` (`canonique_incomplet` en interne), a été ajouté : ces fichiers restent
+utilisables tels quels pour l'audit (rien n'est décalé, la lecture des colonnes se fait par
+texte d'en-tête, pas par position), mais l'app affiche désormais une note explicite plutôt que
+de les traiter silencieusement comme `deja_au_format`.
