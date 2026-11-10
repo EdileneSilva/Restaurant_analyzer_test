@@ -114,6 +114,15 @@ COULEUR_CHAMP_OBLIGATOIRE_VIDE = "FFFABF8F"
 # donnée probablement manquante plutôt qu'une vraie incohérence à corriger. Demandé par
 # l'utilisateur le 2026-11-10.
 COULEUR_PRIX_ZERO = "FFD9D2E9"
+# 'unité'/'UNITÉ' manquait de CATEGORIES_COMMANDE (seuls 'piece'/'pièce'/'pot'/'pu' y
+# pointaient vers 'pc') : categorie_commande('unité') renvoyait donc 'unite' tel quel, une
+# catégorie que verifie_unite_commande_etendue ne traite dans AUCUNE de ses exceptions
+# ("cat == 'pc' and ..."), faute de connaître l'existence de 'unite'. Résultat : une Unité de
+# commande 'unité' se faisait signaler à tort comme incohérente dès qu'un SEUL mot de
+# contenant (ex: 'boîte') apparaissait n'importe où dans la Désignation, même sans rapport
+# avec la quantité commandée (ex: 'poudre de tomates - boîte de 900 g', Conditionnement déjà
+# 'unité' tout court — vu sur Base IANOR AGAPE 16 Epicerie, ligne 40). Trouvé le 2026-11-10.
+motor.CATEGORIES_COMMANDE = {**motor.CATEGORIES_COMMANDE, "unite": "pc"}
 
 motor.PACKAGE_TYPES = tuple(MOTS_CONTENANT)
 # Un ou plusieurs mots qualificatifs (matière, ou...) insérés entre le récipient et sa
@@ -2034,6 +2043,44 @@ def verifie_origine(valeur):
         "bien (liste à élargir si besoin).")
 
 
+_UNITES_POIDS_VOLUME_SEULES = ("g", "gr", "gramme", "grammes", "kg", "kilo", "kilos",
+                                "kilogramme", "kilogrammes", "l", "lt", "litre", "litres",
+                                "ml", "cl")
+
+
+def _boite_ou_carton_groupe_plusieurs_pieces(mot, texte_combine):
+    """'boite'/'carton' ne sont PAS, contrairement à 'pot'/'sachet'/'pièce', traités par
+    défaut comme une pièce vendue à l'unité (voir l'exception 'cat == pc' juste en dessous) :
+    le plus souvent, une 'boîte'/un 'carton' regroupe PLUSIEURS pièces plus petites (ex:
+    'carton de 6 boîtes'). Mais ce n'est pas systématique : 'boîte de 900 g' décrit une seule
+    boîte (un poids, pas un compte). Cherche le nombre qui suit directement le mot : s'il est
+    suivi d'une unité de poids/volume reconnue (ex: 'g', 'kg'), c'est un poids -> une seule
+    pièce (renvoie False, "ne groupe pas") ; sinon (rien après le nombre, ou un autre mot
+    comme 'boîtes'/'pièces') -> un compte de plusieurs pièces (renvoie True). Absence totale
+    de nombre après le mot -> pas de groupement détecté non plus (False, par défaut). Demandé
+    par l'utilisateur le 2026-11-10, vu sur Base IANOR AGAPE 16 Epicerie, ligne 40 ('poudre de
+    tomates - boîte de 900 g', Conditionnement déjà 'unité' seul)."""
+    m = re.search(rf"\b{re.escape(mot)}\w*\s+de\s+(\d+(?:[.,]\d+)?)\s*([a-z]*)",
+                  texte_combine, re.I)
+    if not m:
+        return False
+    return motor.normalise_texte(m.group(2)) not in _UNITES_POIDS_VOLUME_SEULES
+
+
+def _pc_compatible(trouve, texte_combine):
+    """Les mots trouvés dans Conditionnement+Désignation sont-ils compatibles avec une Unité
+    de commande à la pièce/l'unité ('pc') ? 'pièce'/'piece'/'pot'/'sachet' le sont toujours ;
+    'boite'/'carton' seulement s'ILS NE GROUPENT PAS plusieurs pièces (voir
+    _boite_ou_carton_groupe_plusieurs_pieces) — si AU MOINS un des deux groupe réellement
+    (ex: 'carton de 6 boîtes'), ce n'est plus compatible, même si l'autre mot, pris isolément,
+    semblait l'être (ex: 'boite' seul, sans son propre nombre, dans ce même texte)."""
+    if any(m in ("pièce", "piece", "pot", "sachet") for m in trouve):
+        return True
+    candidats = [m for m in trouve if m in ("boite", "carton")]
+    return bool(candidats) and not any(
+        _boite_ou_carton_groupe_plusieurs_pieces(m, texte_combine) for m in candidats)
+
+
 def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
     """Copie de motor.verifie_unite_commande, avec des corrections :
     1. Vocabulaire étendu (cageot/boite/filet/caisse/plaque/plateau/clayette...) ;
@@ -2098,7 +2145,7 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
     remplacements_trouves = {motor.normalise_texte(motor.CONTENANT_ABREGE.get(m, m)) for m in trouve}
     if motor.normalise_texte(unite_cmd) in remplacements_trouves:
         return True, None
-    if cat == "pc" and any(m in ("pièce", "piece", "pot", "sachet") for m in trouve):
+    if cat == "pc" and _pc_compatible(trouve, texte_combine):
         return True, None
     if cat == "barquette" and any(m in ("barquette", "barq") for m in trouve):
         return True, None
@@ -2114,9 +2161,10 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
     conditionnement_corrige, typo = corrige_faute_frappe_contenant(conditionnement)
     if typo:
         cond_corrige = motor.normalise_texte(conditionnement_corrige)
-        trouve_corrige = [m for m in mots_types if m in f"{cond_corrige} {desig}"]
-        if cat_singulier in trouve_corrige or (cat == "pc" and any(
-                m in ("pièce", "piece", "pot", "sachet") for m in trouve_corrige)) or (
+        texte_combine_corrige = f"{cond_corrige} {desig}"
+        trouve_corrige = [m for m in mots_types if m in texte_combine_corrige]
+        if cat_singulier in trouve_corrige or (
+                cat == "pc" and _pc_compatible(trouve_corrige, texte_combine_corrige)) or (
                 cat == "barquette" and any(m in ("barquette", "barq") for m in trouve_corrige)) or (
                 cat == "sac" and "sac" in trouve_corrige) or (cat == "bouteille" and any(
                 m in ("bouteille", "brique") for m in trouve_corrige)):

@@ -636,6 +636,37 @@ l'utilisateur. Aucun changement de total de non-régression (l'arrondi touche un
 l'affichage dans le texte des commentaires, jamais les valeurs numériques utilisées pour décider
 si une cellule est marquée ou non).
 
+### 48. "unité"/"UNITÉ" manquait de la table des catégories de commande ; "boîte"/"carton" ambigus
+
+`categorie_commande("unité")` renvoyait "unite" tel quel (catégorie jamais traitée par aucune
+exception de `verifie_unite_commande_etendue`), faute d'entrée dans `CATEGORIES_COMMANDE` (qui
+ne connaissait que "piece"/"pièce"/"pot"/"pu" → "pc"). Conséquence : une Unité de commande
+"unité" se faisait signaler à tort comme incohérente dès qu'UN SEUL mot de contenant
+apparaissait n'importe où dans le Conditionnement/la Désignation, même sans rapport avec la
+quantité réellement commandée. Trouvé par l'utilisateur sur `Base IANOR AGAPE 16 Epicerie.xlsx`,
+ligne 40 ("poudre de tomates - boîte de 900 g", Conditionnement déjà "unité" seul, Unité de
+commande "unité" signalée "ne semble pas correspondre à l'emballage"). Corrigé : ajout de
+"unite" → "pc" dans `CATEGORIES_COMMANDE` (les deux moteurs, par surcharge comme les autres
+constantes du moteur partagé).
+
+Une fois cette catégorie reconnue, un second problème est apparu : "boîte"/"carton" n'étaient
+pas dans la liste des mots déjà acceptés comme équivalents à "pc" (seuls "pièce"/"pot"/"sachet"
+l'étaient) — ces deux mots désignent le plus souvent un contenant qui GROUPE plusieurs pièces
+(ex: "carton de 6 boîtes"), donc l'exception ne les couvrait pas par défaut. Mais "boîte de
+900 g" (notre cas réel) ne groupe rien : c'est une seule boîte, le nombre qui suit est un
+poids, pas un compte. Nouvelle fonction `_boite_ou_carton_groupe_plusieurs_pieces()` (les deux
+moteurs) : cherche le nombre qui suit directement "boîte"/"carton" — s'il est suivi d'une unité
+de poids/volume reconnue (g, kg, L...), c'est un poids → traité comme une pièce unique
+(compatible avec "pc") ; sinon (rien, ou un autre mot comme "boîtes"/"pièces") → c'est un
+compte de plusieurs pièces → reste incompatible, signalé normalement (ex: "carton de 6
+boîtes", "boîte de 12"). Si "boîte" et "carton" apparaissent tous les deux dans le même texte,
+il suffit qu'UN SEUL des deux groupe réellement pour que l'ensemble reste incompatible (évite
+qu'un "carton de 6 boîtes" soit validé à tort via le mot "boîte" isolé, qui lui n'a pas son
+propre nombre adjacent). Choix fait parmi 3 options proposées à l'utilisateur (traiter
+boîte/carton comme toujours équivalents à "pc" ; seulement selon le nombre adjacent ; ou ne pas
+y toucher) — elle a choisi l'option intermédiaire. Aucun changement de total de non-régression
+sur les 7 fichiers de référence.
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
