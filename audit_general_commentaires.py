@@ -1005,10 +1005,20 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
         if round(prix_ref, 4) != prix_par_piece:
             r.couleur_k = motor.COULEUR_RATIO_SUSPECT
             r.nouveau_k = prix_par_piece
+            # Deux lectures possibles, on ne sait pas laquelle est la bonne (ni quel champ a
+            # l'erreur) : soit le Prix de commande couvre les N pièces et le Prix de référence
+            # doit être divisé par N, soit le Prix de référence est déjà correct par pièce et
+            # c'est le Prix de commande qui devrait être multiplié par N — demandé par
+            # l'utilisateur le 2026-11-10, pour ne pas affirmer une seule direction de
+            # correction sans savoir laquelle des deux valeurs est fautive.
             r.commentaire_k = (
-                f"Prix de référence par pièce suggéré : {prix_cmd} ÷ {n} = {prix_par_piece} "
-                f"(prix de référence actuel : {prix_ref}, qui ne semble pas divisé par le "
-                "nombre de pièces) — à vérifier, non modifié automatiquement.")
+                f"Le Prix de référence actuel ({prix_ref}) ne correspond pas au Prix de "
+                f"commande ({prix_cmd}) divisé par le nombre de pièces ({n}). Deux lectures "
+                f"possibles, impossible de savoir laquelle est la bonne : soit le Prix de "
+                f"référence devrait être {prix_cmd} ÷ {n} = {prix_par_piece} (si {prix_cmd} "
+                f"couvre les {n} pièces), soit le Prix de commande devrait être {prix_ref} × "
+                f"{n} = {round(prix_ref * n, 4)} (si {prix_ref} est déjà le bon prix par "
+                "pièce) — à vérifier, rien n'est modifié automatiquement.")
         return r
 
     resultat_pieces = piece_carton_candidats(unite_ref, conditionnement)
@@ -1532,11 +1542,23 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                     r.nouveau_k = nouveau_k
                     r.couleur_k = motor.COULEUR_RATIO_SUSPECT
                     qte_affichee = round(quantite, 6) if quantite < 1 else round(quantite, 3)
+                    # Deux lectures possibles, on ne sait pas laquelle est la bonne (ni quel
+                    # champ a l'erreur) : soit le Prix de commande couvre tout le conditionnement
+                    # et le Prix de référence doit être divisé par la quantité, soit le Prix de
+                    # référence est déjà correct et c'est le Prix de commande qui devrait être
+                    # multiplié par la quantité — demandé par l'utilisateur le 2026-11-10, pour
+                    # ne pas affirmer une seule direction de correction sans savoir laquelle des
+                    # deux valeurs est fautive.
                     r.commentaire_k = (
-                        f"Prix de référence suggéré : {prix_cmd} ÷ {qte_affichee} "
-                        f"{base} = {nouveau_k} (prix de référence actuel : {prix_ref}). Le "
-                        f"conditionnement ('{conditionnement}') indique {qte_affichee} {base} "
-                        f"pour ce récipient — à vérifier, non modifié automatiquement.")
+                        f"Le Prix de référence actuel ({prix_ref}) ne correspond pas au Prix de "
+                        f"commande ({prix_cmd}) divisé par la quantité du conditionnement "
+                        f"('{conditionnement}' = {qte_affichee} {base}). Deux lectures "
+                        f"possibles, impossible de savoir laquelle est la bonne : soit le Prix "
+                        f"de référence devrait être {prix_cmd} ÷ {qte_affichee} {base} = "
+                        f"{nouveau_k} (si {prix_cmd} couvre tout le conditionnement), soit le "
+                        f"Prix de commande devrait être {prix_ref} × {qte_affichee} = "
+                        f"{round(prix_ref * quantite, 4)} (si {prix_ref} est déjà le bon prix "
+                        f"au {base}) — à vérifier, rien n'est modifié automatiquement.")
                     if mot in ("piece", "pièce"):
                         # 'piece' générique (pas un vrai récipient nommé) : l'incohérence peut
                         # aussi bien venir d'une Unité de référence mal choisie (l'article est
@@ -2453,12 +2475,23 @@ def verifie_coherence_unite_prix_identiques(resultat, unite_ref, unite_cmd, prix
     # 2.25 — contradictoire et faux).
     if (resultat is not None and resultat.nouveau_k is not None
             and abs(resultat.nouveau_k - prix_cmd) > 0.005):
+        # Deux lectures possibles ici aussi (voir le commentaire juste au-dessus sur le bug du
+        # 2026-11-10) : on ne sait pas si c'est le Prix de référence/commande (déjà égaux) qui
+        # devrait baisser vers nouveau_k, ou le Conditionnement/Unité de commande qui est mal
+        # nommé et le prix est en fait correct pour tout le conditionnement.
+        facteur = prix_cmd / resultat.nouveau_k if resultat.nouveau_k else None
+        prix_alternatif = round(prix_cmd * facteur, 4) if facteur else None
+        indication_alternative = (
+            f", soit le Prix de commande devrait être {prix_alternatif}€"
+            if prix_alternatif is not None else ""
+        )
         return (
             f"Unité de référence et Unité de commande identiques ('{l_final}'), et Prix de "
             f"référence = Prix de commande ({prix_cmd}) — cette relation est correcte. Mais le "
             f"Conditionnement ('{conditionnement}') indique en fait une quantité différente de "
-            f"1, ce qui suggère plutôt un prix de référence proche de "
-            f"{round(resultat.nouveau_k, 4)}€ : vérifiez si l'Unité de commande et/ou le Prix de "
+            f"1 : impossible de savoir laquelle des deux valeurs est fautive — soit le Prix de "
+            f"référence devrait être proche de {round(resultat.nouveau_k, 4)}€"
+            f"{indication_alternative}. Vérifiez si l'Unité de commande et/ou le Prix de "
             "commande reflètent bien tout le conditionnement, ou seulement une partie."
         )
     return None
@@ -2718,11 +2751,31 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                    "l'emballage ou au prix — à vérifier à la main.")
             total += 1
         if k_differe:
+            # Deux lectures possibles, on ne sait pas laquelle est la bonne (ni quel champ a
+            # l'erreur) : soit le Prix de référence devrait être la valeur suggérée
+            # (nouveau_k), soit le Prix de commande devrait plutôt être ajusté dans l'autre
+            # sens, par le même facteur — demandé par l'utilisateur le 2026-11-10, pour ne pas
+            # affirmer une seule direction de correction sans savoir laquelle des deux valeurs
+            # est fautive.
+            facteur = prix_cmd / resultat.nouveau_k if resultat.nouveau_k else None
+            prix_cmd_alternatif = round(prix_ref * facteur, 4) if facteur else None
+            if prix_cmd_alternatif is not None:
+                texte = (
+                    f"Le Prix de référence actuel ({prix_ref}€) ne correspond pas au Prix de "
+                    f"commande ({prix_cmd}€) d'après la comparaison des prix. Deux lectures "
+                    f"possibles, impossible de savoir laquelle est la bonne : soit le Prix de "
+                    f"référence devrait être {round(resultat.nouveau_k, 4)}€, soit le Prix de "
+                    f"commande devrait être {prix_cmd_alternatif}€ — à vérifier avant de "
+                    "changer quoi que ce soit."
+                )
+            else:
+                texte = (
+                    f"D'après la comparaison des prix, le prix de référence semble plutôt "
+                    f"devoir être {round(resultat.nouveau_k, 4)}€ (ici : {prix_ref}€) — à "
+                    "vérifier avant de changer quoi que ce soit."
+                )
             marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]),
-                   motor.COULEUR_RATIO_SUSPECT, fournisseur["nom"],
-                   f"D'après la comparaison des prix, le prix de référence semble plutôt "
-                   f"devoir être {round(resultat.nouveau_k, 4)}€ (ici : {prix_ref}€) — à "
-                   "vérifier avant de changer quoi que ce soit.")
+                   motor.COULEUR_RATIO_SUSPECT, fournisseur["nom"], texte)
             total += 1
         elif resultat.couleur_k in COULEURS_INCOHERENCE and resultat.commentaire_k:
             marque(ws.cell(row=ligne, column=fournisseur["prix_ref"]),

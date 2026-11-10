@@ -607,6 +607,21 @@ corriger — demandé explicitement par l'utilisateur, qui a aussi proposé l'op
 (garder le gris et changer tous les autres usages) ; option écartée ici pour ne pas toucher à
 la dizaine d'autres cas qui réutilisent légitimement ce gris générique ailleurs dans le code.
 
+### 47. Suggestions de prix reformulées : direction de la correction présentée comme incertaine
+
+Les messages qui suggéraient un recalcul de prix (ex: "Prix de référence suggéré : X ÷ N = Y")
+affirmaient une seule direction de correction, celle qui divise le Prix de commande — jamais
+l'inverse (multiplier le Prix de référence). Rien dans les données ne permet pourtant de savoir
+lequel des deux prix contient réellement l'erreur : le Conditionnement confirme juste qu'un
+FACTEUR existe entre les deux valeurs attendues, pas lequel des deux champs a été mal saisi.
+Reformulé (3 messages distincts, dans les deux moteurs) pour présenter les deux lectures
+possibles sans trancher : "soit le Prix de référence devrait être X÷N, soit le Prix de commande
+devrait être Y×N — à vérifier." Demandé explicitement par l'utilisateur le 2026-11-10, après
+avoir vu le message affirmer "le prix de référence devrait être 0.225€" sur un cas où le Prix
+de commande (2.25€, pour un conditionnement "10KG") aurait tout aussi bien pu être celui qui
+avait l'erreur (devrait être 22.5€, si le Prix de référence à 2.25€ était en fait déjà
+correct). Aucun changement de total (même cellule marquée avant/après, seul le texte change).
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
