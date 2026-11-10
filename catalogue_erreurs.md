@@ -221,6 +221,41 @@ confirmés dans `pret_pour_audit/`), gravité pressentie, et si une règle exist
   un futur script de transformation de ce format s'il n'est pas anticipé.
 - **Couverte par le code** : non applicable (format pas encore pris en charge).
 
+### 58. Même contradiction que la règle n°16, trouvée dans le moteur partagé (`first_scripts/first_attempt_v2_prototype.py`)
+- **Découvert le 2026-11-10** en recherchant d'autres cas semblables à celui corrigé dans la
+  règle n°16 (Unité de référence → 'PC' alors qu'un vrai décompte de pièces est connu et
+  mériterait plutôt 'PAQUET' + colonne F, voir la révision de la règle n°16). Même contradiction,
+  déclenchée différemment : ici, c'est l'Unité de référence qui est déjà un simple mot de
+  récipient ("Seau", "Colis", "Carton"...), et le **Conditionnement** qui porte le décompte
+  ("Seau de 75 pièces") — fonction `traite_ligne` (`PACKAGE_TYPES` / `extraire_nombre_pieces`,
+  lignes ~800-852).
+- **Exemple réel** : `pret_pour_audit/MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx`, lignes
+  138-141 (toutes des œufs) :
+  | Ligne | Unité réf | Conditionnement | Prix réf = Prix cmd | D actuel | K suggéré actuel |
+  |---|---|---|---|---|---|
+  | 138 | Seau | "Seau de 75 pièces" | 17,57€ | PC | 17,57÷75=0,2343€ |
+  | 139 | Poche | "Colis de 4 x 10 pièces" | 13,63€ | PC | 13,63÷40=0,3407€ |
+  | 140 | Colis | "Colis de 100 pièces" | 44,60€ | PC | 44,60÷100=0,446€ |
+  | 141 | Carton | "Colis de 60 pièces" | 26,94€ | PC | 26,94÷60=0,449€ |
+
+  Dans les 4 cas, Prix de référence est déjà égal à Prix de commande (exactement comme le cas
+  œufs de la règle n°16) — le décompte (75/40/100/60) sert uniquement à calculer une suggestion
+  de prix par pièce, puis est perdu : il n'est jamais écrit dans "Nombre de pièces" (F reste
+  `None`).
+- **Correction envisagée** (même principe que la révision de la règle n°16, PAS encore
+  appliquée) : Unité de référence → 'PAQUET' (au lieu de 'PC'), Nombre de pièces → le décompte
+  (75/40/100/60), plus de recalcul de prix par pièce (Prix de référence = Prix de commande déjà,
+  comme pour le cas œufs de la règle n°16).
+- **Gravité pressentie** : information (prix déjà cohérents une fois corrigé, rien à corriger
+  en urgence) — mais incohérence identique à celle déjà corrigée ailleurs, laissée ici pour que
+  le constat ne se perde pas.
+- **Couverte par le code** : **non, volontairement reporté** — ce code vit dans le moteur
+  partagé par les deux engines (`motor`, importé par `audit_general.py` ET
+  `audit_general_commentaires.py` — voir le danger de la règle n°41) et touche l'un des 7
+  fichiers de référence (donc les totaux de non-régression changeraient) : l'utilisatrice a
+  préféré laisser tel quel pour l'instant plutôt que de corriger dans la foulée de la règle
+  n°16, le temps de revoir ça plus posément.
+
 ## Erreurs et règles ajoutées depuis (2026-10-20 à 2026-10-22)
 
 Le jeu de fichiers de référence est passé de 5 à **7 fichiers** (ajout de
