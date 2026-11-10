@@ -2094,8 +2094,9 @@ def verifie_origine(valeur):
             "s'applique réellement à ce produit (une seule valeur attendue).")
     return False, (
         f"Origine ('{valeur}') non reconnue : ni une des 4 catégories (France, UE, Hors UE, "
-        "Monde), ni un pays de la liste connue — vérifier l'orthographe, ou que ce pays existe "
-        "bien (liste à élargir si besoin).")
+        "Monde), ni un pays de la liste connue. Si ce n'est pas un pays, c'est probablement une "
+        "région ou un département français (ex: 'Charente') plutôt qu'un pays mal orthographié "
+        "— auquel cas Origine devrait plutôt être 'France' — à vérifier avant de corriger.")
 
 
 _UNITES_POIDS_VOLUME_SEULES = ("g", "gr", "gramme", "grammes", "kg", "kilo", "kilos",

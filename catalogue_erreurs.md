@@ -777,6 +777,28 @@ Produits laitiers, et MDC_IMPORT_MARCHE parmi les 7 fichiers de référence) ; "
 ajoutés par anticipation (même risque, pas encore vus en pratique). Aucun changement de total
 de non-régression sur les 7 fichiers de référence.
 
+### 53. Origine non reconnue : message explicite sur l'hypothèse la plus probable (région française)
+
+`verifie_origine` signalait une valeur d'Origine non reconnue (ni une des 4 catégories France/
+UE/Hors UE/Monde, ni un pays de `PAYS_ORIGINE_CONNUS`) avec un message générique ("vérifier
+l'orthographe, ou que ce pays existe bien"), sans jamais dire QUOI vérifier en premier. Dans la
+pratique, l'écrasante majorité de ces valeurs non reconnues sont des noms de région ou de
+département français (ex: "Charente", vu sur `Base IANOR AGAPE 16 Produits laitiers.xlsx`,
+lignes 112-138, et `Base IANOR AGAPE 16 Charcuterie.xlsx`/`Base IANOR AGAPE 16 Epicerie.xlsx`) —
+pas des pays mal orthographiés. Demandé par l'utilisateur le 2026-11-10 : rendre cette
+hypothèse explicite dans le message plutôt que de laisser deviner.
+
+Message reformulé (les deux moteurs) : "Si ce n'est pas un pays, c'est probablement une région
+ou un département français... auquel cas Origine devrait plutôt être 'France'... à vérifier
+avant de corriger." Reste une simple REFORMULATION du signalement, pas un changement de
+comportement : `verifie_origine` ne modifie toujours jamais la valeur elle-même (documenté
+dans son propre docstring) — contrairement à `pretraitement_a_formater._origine_bpu` (famille
+MP ARDECHE 24), qui, elle, réécrit automatiquement vers "France" pour les régions de
+`REGIONS_FRANCE` (une liste précise et validée, propre à cette famille de fichiers) ; aucune
+liste équivalente n'existe pour l'ensemble des ~100 départements français, donc pas de
+réécriture automatique ici, seulement le signalement explicite. Aucun changement de total de
+non-régression sur les 7 fichiers de référence (texte du message changé, pas son déclenchement).
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
