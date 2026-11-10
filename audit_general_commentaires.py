@@ -124,7 +124,21 @@ COULEUR_PRIX_ZERO = "FFD9D2E9"
 # contenant (ex: 'boîte') apparaissait n'importe où dans la Désignation, même sans rapport
 # avec la quantité commandée (ex: 'poudre de tomates - boîte de 900 g', Conditionnement déjà
 # 'unité' tout court — vu sur Base IANOR AGAPE 16 Epicerie, ligne 40). Trouvé le 2026-11-10.
-motor.CATEGORIES_COMMANDE = {**motor.CATEGORIES_COMMANDE, "unite": "pc"}
+motor.CATEGORIES_COMMANDE = {
+    **motor.CATEGORIES_COMMANDE,
+    "unite": "pc",
+    # Même bug que "unite" ci-dessus, pour les mots en toutes lettres de kg/L : seuls les
+    # codes courts "kg"/"l" étaient reconnus, jamais "litre(s)"/"kilo(s)"/"kilogramme(s)" —
+    # categorie_commande("litre") renvoyait donc "litre" tel quel, une catégorie qu'aucune
+    # exception de verifie_unite_commande_etendue ne traite ("cat in ('kg','l')" échoue sur
+    # "litre" ≠ "l") : une Unité de commande "litre" se faisait signaler à tort comme
+    # incohérente dès qu'un mot de contenant apparaissait dans le Conditionnement, même pour
+    # un contenant d'UNE seule unité (ex: "bouteille de 1 l", Conditionnement et Unité de
+    # commande déjà cohérents). Trouvé le 2026-11-10 sur Base IANOR AGAPE 16 Epicerie, ligne
+    # 115 ("extrait de vanille", Unité de commande "litre", Conditionnement "bouteille de 1 l").
+    "litre": "l", "litres": "l",
+    "kilo": "kg", "kilos": "kg", "kilogramme": "kg", "kilogrammes": "kg",
+}
 
 motor.PACKAGE_TYPES = tuple(MOTS_CONTENANT)
 # Un ou plusieurs mots qualificatifs (matière, ou...) insérés entre le récipient et sa

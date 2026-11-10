@@ -752,6 +752,31 @@ l'utilisateur après lui avoir signalé cette asymétrie : le silence ne s'appli
 correction réellement appliquée ailleurs. Aucun changement de total de non-régression sur les 7
 fichiers de référence.
 
+### 52. "litre"/"kilo"/"kilogramme" (en toutes lettres) manquaient de la table des catégories de commande
+
+Même bug que la règle n°48 ("unité" absente de `CATEGORIES_COMMANDE`), cette fois pour les mots
+en toutes lettres de kg/L : seuls les codes courts "kg"/"l" étaient reconnus par
+`categorie_commande`, jamais "litre(s)"/"kilo(s)"/"kilogramme(s)". Conséquence :
+`categorie_commande("litre")` renvoyait "litre" tel quel, une catégorie qu'aucune exception de
+`verifie_unite_commande_etendue` ne traite — en particulier, `cat in ("kg", "l")` (la toute
+première exemption, "déjà au bon format, rien à signaler") échoue sur "litre" ≠ "l". Une Unité
+de commande "litre" se faisait donc signaler à tort comme incohérente dès qu'un mot de
+contenant apparaissait dans le Conditionnement, même pour un contenant d'UNE SEULE unité où
+Unité de référence = Unité de commande = "litre" et les deux prix déjà identiques (la règle
+n°45 sur les contenants d'1 unité ne pouvait pas s'appliquer non plus, puisqu'elle dépend du
+même mécanisme en amont). Trouvé par l'utilisateur sur Base IANOR AGAPE 16 Epicerie, ligne 115
+("extrait de vanille", Unité de commande "litre", Conditionnement "bouteille de 1 l") — elle
+avait l'impression de redemander la même règle que n°45 sans comprendre pourquoi elle
+continuait d'apparaître : la cause réelle était différente à chaque fois (un mot non reconnu
+par la table de catégories), le symptôme seul se ressemblait.
+
+Corrigé en ajoutant "litre"/"litres" -> "l" et "kilo"/"kilos"/"kilogramme"/"kilogrammes" -> "kg"
+à `CATEGORIES_COMMANDE` (les deux moteurs, même surcharge que pour "unite"). "litre" est
+confirmé présent dans 3 fichiers réels (Base IANOR AGAPE 16 Epicerie, Base IANOR AGAPE 16
+Produits laitiers, et MDC_IMPORT_MARCHE parmi les 7 fichiers de référence) ; "kilo"/"kilogramme"
+ajoutés par anticipation (même risque, pas encore vus en pratique). Aucun changement de total
+de non-régression sur les 7 fichiers de référence.
+
 ## Jeu de référence (pour TT-09)
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
