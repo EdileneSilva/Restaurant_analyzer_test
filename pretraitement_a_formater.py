@@ -1196,20 +1196,21 @@ def _est_nombre_bpu(valeur):
 # officielle de CONTENANT_ABREGE (audit_general.py) — demandé explicitement par l'utilisatrice
 # le 2026-11-12, tant qu'elle n'a pas la permission de faire ce choix métier.
 SIGLES_UNITE_VENTE_BPU = {
-    # "PIECE" et "BARQUETTE" tout en majuscules (sans accent pour PIECE), demandé
-    # explicitement le 2026-11-12 pour matcher la casse exacte de la liste officielle des
-    # unités acceptées (capture d'écran fournie par l'utilisatrice — voir aussi la correction
-    # "Poche"/"Unité" dans CONTENANT_ABREGE, audit_general.py) — uniformité voulue, PAS encore
-    # la substitution officielle pour les autres mots (toujours en attente de permission).
+    # Casse exacte vérifiée le 2026-11-12 contre la liste officielle des unités acceptées
+    # (capture d'écran fournie par l'utilisatrice — même source que la correction
+    # "Poche"/"Unité" dans CONTENANT_ABREGE, audit_general.py) : TOUT en majuscules, SAUF
+    # "Poche" (seule exception confirmée sur cette liste, avec "Unité" qui n'apparaît pas ici).
+    # Uniformité de casse voulue, PAS encore la substitution officielle pour les mots absents
+    # de cette liste (Bocal/Colis/Flacon/Brique, toujours en attente de permission).
     # "po" (confirmé par l'utilisatrice -> PIECE, vu sur BPF Lot 5 : fromages en portions
     # individuelles préemballées, ex: "Camembert préamballé 30g").
-    "ba": "BARQUETTE", "bid": "Bidon", "bte": "Boîte", "ct": "Carton",
-    "paq": "Paquet", "pch": "Poche", "sea": "Seau", "pl": "Plateau",
-    "pi": "PIECE", "po": "PIECE", "st": "Sachet", "sh": "Sachet", "bcl": "Bocal",
+    "ba": "BARQUETTE", "bid": "BIDON", "bte": "BOITE", "ct": "CARTON",
+    "paq": "PAQUET", "pch": "Poche", "sea": "SEAU", "pl": "PLATEAU",
+    "pi": "PIECE", "po": "PIECE", "st": "SACHET", "sh": "SACHET", "bcl": "Bocal",
     "col": "Colis", "flc": "Flacon", "brq": "Brique",
     # Déjà en toutes lettres dans certains fichiers (pas des sigles à proprement parler),
     # gardés ici pour une seule recherche normalisée : juste la bonne casse.
-    "sac": "Sac", "kg": "KG", "pc": "PIECE", "pu": "PIECE", "pot": "Pot",
+    "sac": "SAC", "kg": "KG", "pc": "PIECE", "pu": "PIECE", "pot": "POT",
 }
 
 # "BIB" (Bag-in-Box, confirmé via "Bib de 5 L"/"Bib 10kg" dans le Conditionnement) n'a aucun
@@ -1259,7 +1260,14 @@ MOTS_IGNORES_UNITE_CMD_BPU = {
 # emprunté (sigle développé, mot repris tel quel, ou repli sur le Conditionnement) — demandé
 # explicitement le 2026-11-12 pour matcher la casse exacte de la liste officielle des unités
 # acceptées, même logique que SIGLES_UNITE_VENTE_BPU plus haut.
-MOTS_MAJUSCULES_UNITE_CMD_BPU = {"piece": "PIECE", "barquette": "BARQUETTE"}
+# Même liste que SIGLES_UNITE_VENTE_BPU ci-dessus (tout en majuscules sauf "Poche"), appliquée
+# ici en filet de sécurité pour le mot qui ressortirait par repli sur le Conditionnement
+# (ex: APAGEH, "sac sous vide" -> "Sac" avant cette passe) plutôt que par un sigle développé.
+MOTS_MAJUSCULES_UNITE_CMD_BPU = {
+    "piece": "PIECE", "barquette": "BARQUETTE", "bidon": "BIDON", "boite": "BOITE",
+    "carton": "CARTON", "paquet": "PAQUET", "seau": "SEAU", "plateau": "PLATEAU",
+    "sachet": "SACHET", "sac": "SAC", "pot": "POT",
+}
 
 
 def _casse_officielle_unite_cmd_bpu(mot):
@@ -1279,9 +1287,19 @@ def _nettoie_unite_cmd_bpu(unite_cmd, conditionnement=None):
     if not unite_cmd:
         return unite_cmd
     texte = str(unite_cmd).strip()
-    for mot in RE_MOT_UNITE_CMD_BPU.findall(texte):
+    mots = RE_MOT_UNITE_CMD_BPU.findall(texte)
+    # Déjà UN SEUL mot propre, sans aucun chiffre à côté (ex: 'KG'/'L', sorti du miroir
+    # Unité de référence quand 'Unité de vente' est vide, ou 'Carton' déjà développé) : rien à
+    # chercher, c'est déjà la valeur finale — même si ce mot est par ailleurs dans
+    # MOTS_IGNORES_UNITE_CMD_BPU (qui ne sert qu'à ignorer un mot DE MESURE noyé dans une
+    # PHRASE avec d'autres mots, pas à rejeter une valeur déjà seule et correcte). Bug trouvé
+    # le 2026-11-12 : sans ce cas à part, 'KG' tombait dans la recherche ci-dessous, était
+    # ignoré (comme mot de mesure), et finissait remplacé à tort par un mot du Conditionnement.
+    if len(mots) == 1 and mots[0] == texte:
+        return _casse_officielle_unite_cmd_bpu(texte)
+    for mot in mots:
         if pt._normalise(mot) not in MOTS_IGNORES_UNITE_CMD_BPU:
-            return _casse_officielle_unite_cmd_bpu(texte if mot == texte else mot.capitalize())
+            return _casse_officielle_unite_cmd_bpu(mot.capitalize())
     return _casse_officielle_unite_cmd_bpu(_mot_recipient_conditionnement_bpu(conditionnement) or unite_cmd)
 
 
@@ -1400,20 +1418,10 @@ ALLERGENES_ATTENDUS_BPU = ["Gluten", "Crustacés", "Oeufs", "Poissons", "Arachid
 
 RE_FOURNISSEUR_NOM_FICHIER_BPU = re.compile(r"^(.*?)\s*-\s*lot\s*\d+", re.I)
 
-# "Local" déduit de la Provenance : demandé par l'utilisatrice le 2026-11-12 pour cette famille
-# de fichiers (CD45 = Conseil départemental du Loiret) — toute mention de "Loire" (Loiret,
-# Indre-et-Loire, Pays de la Loire, "maraîchers loirétains"...) OU "Loir et Cher"/"Loir-et-Cher"
-# (département voisin, nom différent de "Loire" mais inclus explicitement à sa demande) marque
-# Local = 'X'. Recherche sur le texte normalisé (sans accents/casse), car la Provenance de ces
-# fichiers est souvent une liste d'ingrédients ("Artichauts - Espagne; eau - Espagne..."), donc
-# "loire"/"loir et cher" peuvent apparaître n'importe où dans le texte, pas juste au début.
-RE_ORIGINE_LOCALE_BPU = re.compile(r"loire|loir\s*-?\s*et\s*-?\s*cher", re.I)
-
-
-def _local_depuis_provenance_bpu(origine):
-    if not origine:
-        return None
-    return "X" if RE_ORIGINE_LOCALE_BPU.search(pt._normalise(origine)) else None
+# "Local" déduit de la Provenance (mention de "Loire"/"Loir et Cher") : demandé le 2026-11-12,
+# puis RETIRÉ le même jour — l'utilisatrice a jugé, après relecture attentive des résultats,
+# que ce n'était pas fiable à inférer automatiquement. "Local" reste donc vide pour cette
+# famille, comme pour les autres champs non déduits (voir plus bas, local=None).
 
 
 # Même convention que _lot_ardeche ci-dessus (LOT 01 à LOT 09, zéro devant pour un tri/affichage
@@ -1511,7 +1519,7 @@ def transforme_bpu_dqe_webgerest_cd45(chemin_source, chemin_sortie, nom_fichier_
         bio = "X" if col_bio and ws.cell(row=r, column=col_bio).value else None
         label = ws.cell(row=r, column=col_label).value if col_label else None
         origine = ws.cell(row=r, column=col_origine).value if col_origine else None
-        local = _local_depuis_provenance_bpu(origine)
+        local = None  # retiré le 2026-11-12, voir commentaire plus haut
 
         allergenes = {nom: None for nom in pt.ALLERGENES}
         if col_allergenes:
