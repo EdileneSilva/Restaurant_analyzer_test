@@ -1324,6 +1324,22 @@ def _local_depuis_provenance_bpu(origine):
     return "X" if RE_ORIGINE_LOCALE_BPU.search(pt._normalise(origine)) else None
 
 
+# Même convention que _lot_ardeche ci-dessus (LOT 01 à LOT 09, zéro devant pour un tri/affichage
+# texte correct) — demandé explicitement par l'utilisatrice pour cette famille aussi, les lots 1
+# à 9 existant bien ici (Marché, colonne A, ex: "LOT 1 - VIANDES SURGELEES").
+RE_MARCHE_LOT_NUMERO_BPU = re.compile(r"^(lot)\s*(\d+)(.*)$", re.I)
+
+
+def _formate_marche_bpu(marche_brut):
+    if not marche_brut:
+        return marche_brut
+    m = RE_MARCHE_LOT_NUMERO_BPU.match(str(marche_brut).strip())
+    if not m:
+        return marche_brut
+    mot, numero, reste = m.groups()
+    return f"{mot.upper()} {int(numero):02d}{reste}"
+
+
 def _fournisseur_depuis_nom_fichier_bpu(nom_fichier):
     """Le nom du fournisseur n'est écrit NULLE PART dans ces fichiers (ni Page de Garde, ni
     cellule) — seulement dans le nom du fichier lui-même (ex: 'BPF - LOT 11 - BPU DQE -
@@ -1377,7 +1393,7 @@ def transforme_bpu_dqe_webgerest_cd45(chemin_source, chemin_sortie, nom_fichier_
         designation = ws.cell(row=r, column=3).value
         if not designation:
             continue
-        marche = ws.cell(row=r, column=1).value
+        marche = _formate_marche_bpu(ws.cell(row=r, column=1).value)
         famille = ws.cell(row=r, column=2).value
         desig_fourn = ws.cell(row=r, column=4).value
         reference = ws.cell(row=r, column=5).value
@@ -1394,7 +1410,11 @@ def transforme_bpu_dqe_webgerest_cd45(chemin_source, chemin_sortie, nom_fichier_
         if commentaire_vente:
             avertissements.append((r, designation, commentaire_vente))
 
-        bio = "X" if col_bio and pt._normalise(ws.cell(row=r, column=col_bio).value) in ("oui", "x") else None
+        # Vérifié sur les 13 fichiers réels : la seule valeur utilisée dans cette colonne est
+        # le mot "BIO" lui-même (jamais "OUI"/"X" malgré le menu déroulant source qui propose
+        # les deux) — toute valeur non vide y suffit, donc testée au sens large plutôt que sur
+        # une liste de mots précis qui aurait pu en rater d'autres.
+        bio = "X" if col_bio and ws.cell(row=r, column=col_bio).value else None
         label = ws.cell(row=r, column=col_label).value if col_label else None
         origine = ws.cell(row=r, column=col_origine).value if col_origine else None
         local = _local_depuis_provenance_bpu(origine)
