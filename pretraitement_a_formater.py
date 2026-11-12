@@ -1169,6 +1169,241 @@ def trouve_entree_connue(nom_fichier_ou_chemin):
     return None
 
 
+# ============================================================================
+# "TR__BPU_pour_intégration_Webgerest_CD45" — 13 fichiers (un par fournisseur/lot), reçus le
+# 2026-11-12. PAS ENCORE enregistrée dans trouve_entree_connue/transforme_fichier_connu : par
+# choix explicite de l'utilisatrice, cette famille reste à part pour l'instant (seule la
+# transformation est demandée, pas encore le branchement automatique ni l'audit).
+#
+# Règle de correspondance établie à partir de MODELE_IMPORT_MARCHE EDILENE.xlsx (ligne 2 =
+# en-tête canonique, ligne 3 = légende du nom utilisé dans les fichiers bruts) et vérifiée sur
+# les 13 fichiers réels : feuille "BPU - LOT N", en-tête en ligne 3, données à partir de la
+# ligne 5 (la ligne 4 est un texte-modèle pour les colonnes A à P, mais sert de VRAI sous-
+# en-tête pour le bloc des 14 allergènes — voir _COL_ALLERGENES_DEPART ci-dessous). Colonnes A
+# à M à position fixe, identique dans les 13 fichiers ; à partir de la colonne N, l'ensemble et
+# l'ordre de (Bio/Label eligible EGAlim/Provenance ou Origine/Allergènes/Possibilité de
+# déconditionner) varient d'un fichier à l'autre — repérées par texte d'en-tête, jamais par
+# position.
+# ============================================================================
+
+def _est_nombre_bpu(valeur):
+    return isinstance(valeur, (int, float))
+
+
+# Sigles trouvés dans "Unité de vente" (colonne J), confirmés UN PAR UN en croisant avec le
+# Conditionnement/Désignation de la même ligne sur les fichiers réels (pas devinés) — voir
+# catalogue_erreurs.md. Mot complet/bien orthographié seulement : PAS encore la substitution
+# officielle de CONTENANT_ABREGE (audit_general.py) — demandé explicitement par l'utilisatrice
+# le 2026-11-12, tant qu'elle n'a pas la permission de faire ce choix métier.
+SIGLES_UNITE_VENTE_BPU = {
+    "ba": "Barquette", "bid": "Bidon", "bte": "Boîte", "ct": "Carton",
+    "paq": "Paquet", "pch": "Poche", "sea": "Seau", "pl": "Plateau",
+    "pi": "Pièce", "st": "Sachet", "sh": "Sachet", "bcl": "Bocal",
+    "col": "Colis", "flc": "Flacon", "brq": "Brique",
+    # Déjà en toutes lettres dans certains fichiers (pas des sigles à proprement parler),
+    # gardés ici pour une seule recherche normalisée : juste la bonne casse.
+    "sac": "Sac", "kg": "KG", "pc": "Pièce", "pu": "Pièce", "pot": "Pot",
+}
+
+# "BIB" (Bag-in-Box, confirmé via "Bib de 5 L"/"Bib 10kg" dans le Conditionnement) n'a aucun
+# équivalent dans unites_commande_non_reconnues.md — décision métier en attente, voir
+# catalogue_erreurs.md. Pas dans SIGLES_UNITE_VENTE_BPU : traité par repli (mot du
+# Conditionnement recopié tel quel) comme n'importe quel mot non reconnu.
+
+RE_PREMIER_MOT_BPU = re.compile(r"^\s*([A-Za-zÀ-ÿ]+)")
+
+
+def _mot_recipient_conditionnement_bpu(conditionnement):
+    """Premier mot du Conditionnement (ex: 'Bib 10kg' -> 'Bib', 'Carton de 6 boutelles' ->
+    'Carton') — utilisé seulement pour le cas où 'Unité de vente' n'est qu'un multiplicateur
+    nu (voir _unite_et_prix_vente_bpu). Recherche volontairement simple (premier mot
+    alphabétique) : pas de vocabulaire de récipients à importer ici (éviterait d'importer
+    audit_general.py, dangereux — voir catalogue_erreurs.md, bug n°41)."""
+    if not conditionnement:
+        return None
+    m = RE_PREMIER_MOT_BPU.match(str(conditionnement))
+    return m.group(1).capitalize() if m else None
+
+
+def _unite_reference_et_poids_bpu(unite_min_brute):
+    """'Unité minimum' (colonne H) -> (Unité de référence, Poids). Vu dans les 13 fichiers :
+    'Kg'/'L'/'Pièce' presque partout (-> KG/L/PC, pas de poids connu par pièce à ce stade) ;
+    APAGEH Lot 12 écrit '1 kg' partout (équivalent à 'Kg') ; POMONA Lot 7 a quelques lignes où
+    c'est déjà un nom de contenant ('Colis', 'Boîte') — recopié tel quel pour l'instant (pas de
+    règle PC/PAQUET appliquée ici, qui est du ressort de l'audit, pas de cette transformation)."""
+    norm = pt._normalise(unite_min_brute)
+    norm = re.sub(r"^1\s*", "", norm)  # "1 kg" -> "kg" (APAGEH)
+    if norm in ("kg", "kilo", "kilogramme"):
+        return "KG", None
+    if norm in ("l", "litre"):
+        return "L", None
+    if norm in ("piece", "pièce", "pc"):
+        return "PC", None
+    return str(unite_min_brute).strip(), None
+
+
+def _unite_et_prix_vente_bpu(unite_ref, prix_min, unite_vente_brute, prix_vente_brute, conditionnement):
+    """'Unité de vente'/'Prix de l'unité de vente' (colonnes J/I) -> (unite_cmd, prix_cmd,
+    commentaire_ou_None). Trois cas, en plus du cas normal :
+    1. Les deux vides : "SI DIFFERENTE DE L'UNITE MINIMUM" (mode d'emploi du fichier source) —
+       miroir direct de l'unité/prix minimum.
+    2. Inversion confirmée sur BPF Lot 5 (100% des lignes utilisées, 44/44) : le sigle d'unité
+       est dans la colonne Prix, le prix est dans la colonne Unité — corrigé en les
+       échangeant avant de continuer.
+    3. Multiplicateur nu confirmé sur LOGIFRAIS Lot 13 (42/71 lignes) : 'Unité de vente' n'est
+       qu'un nombre (ex: 10, 24) — le vrai nom d'unité vient du Conditionnement, pas de cette
+       colonne."""
+    if prix_vente_brute is None and unite_vente_brute is None:
+        return unite_ref, prix_min, None
+
+    prix_vente, unite_vente = prix_vente_brute, unite_vente_brute
+    commentaire = None
+    if not _est_nombre_bpu(prix_vente) and _est_nombre_bpu(unite_vente):
+        # Cas 2 : inversion.
+        prix_vente, unite_vente = unite_vente, prix_vente
+        commentaire = (
+            "Prix et Unité de vente trouvés inversés dans le fichier source (le sigle d'unité "
+            "était dans la colonne Prix, le prix dans la colonne Unité) — corrigé "
+            "automatiquement avant transformation."
+        )
+
+    if _est_nombre_bpu(unite_vente):
+        # Cas 3 (ou cas 2 non reconnu) : pas de mot d'unité du tout, juste un nombre -> on le
+        # cherche dans le Conditionnement.
+        mot = _mot_recipient_conditionnement_bpu(conditionnement)
+        if mot:
+            texte = (
+                f"Unité de vente du fichier source n'est qu'un multiplicateur ({unite_vente}) "
+                f"sans nom d'unité — repris du Conditionnement ('{conditionnement}')."
+            )
+            return mot, prix_vente, (commentaire + " " + texte if commentaire else texte)
+        texte = (
+            f"Unité de vente du fichier source n'est qu'un multiplicateur ({unite_vente}) sans "
+            "nom d'unité, et aucun mot n'a été trouvé dans le Conditionnement pour la "
+            "déduire — à compléter manuellement."
+        )
+        return None, prix_vente, (commentaire + " " + texte if commentaire else texte)
+
+    sigle = pt._normalise(unite_vente)
+    mot_connu = SIGLES_UNITE_VENTE_BPU.get(sigle)
+    if mot_connu:
+        return mot_connu, prix_vente, commentaire
+    # Pas un sigle connu : déjà écrit en toutes lettres dans le fichier source (ex: "Barquette
+    # 1,5 kg", "colis de 24 unités") — recopié tel quel.
+    return str(unite_vente).strip(), prix_vente, commentaire
+
+
+def _trouve_colonne_entete_bpu(ws, ligne, fragment):
+    fragment = pt._normalise(fragment)
+    for c in range(1, ws.max_column + 1):
+        v = pt._normalise(ws.cell(row=ligne, column=c).value)
+        if fragment in v:
+            return c
+    return None
+
+
+ALLERGENES_ATTENDUS_BPU = ["Gluten", "Crustacés", "Oeufs", "Poissons", "Arachides", "Soja",
+                           "Lait", "Fruits à coques", "Céleri", "Moutarde", "Sésame",
+                           "Sulfites", "Lupins", "Mollusques"]
+
+RE_FOURNISSEUR_NOM_FICHIER_BPU = re.compile(r"^(.*?)\s*-\s*lot\s*\d+", re.I)
+
+
+def _fournisseur_depuis_nom_fichier_bpu(nom_fichier):
+    """Le nom du fournisseur n'est écrit NULLE PART dans ces fichiers (ni Page de Garde, ni
+    cellule) — seulement dans le nom du fichier lui-même (ex: 'BPF - LOT 11 - BPU DQE -
+    ...xlsx' -> 'BPF'), comme pour la famille MP ARDECHE 24. Tolère l'espace manquant avant
+    'LOT' vu sur un des 13 fichiers ('SOCOPA -LOT 9')."""
+    nom = _sans_extension_xlsx(os.path.basename(str(nom_fichier)))
+    m = RE_FOURNISSEUR_NOM_FICHIER_BPU.match(nom)
+    return m.group(1).strip() if m else nom
+
+
+def transforme_bpu_dqe_webgerest_cd45(chemin_source, chemin_sortie, nom_fichier_pour_fournisseur=None):
+    """Transforme un fichier de la famille "TR__BPU_pour_intégration_Webgerest_CD45" (13
+    fichiers, un par fournisseur/lot). `nom_fichier_pour_fournisseur` : nom à utiliser pour en
+    déduire le fournisseur (utile quand chemin_source est déjà un objet en mémoire, sans nom de
+    fichier exploitable) — par défaut, celui de chemin_source.
+
+    Renvoie (nb_lignes, avertissements) : `avertissements` est la liste des lignes où
+    'Unité de vente' a demandé une correction (inversion, multiplicateur nu) ou n'a pas pu être
+    déduite du tout — `ecrit_classeur_canonique` ne sait poser un commentaire que sur la cellule
+    Unité de RÉFÉRENCE, pas sur l'Unité de commande, donc ce n'est pas écrit dans le fichier de
+    sortie pour l'instant, juste renvoyé ici pour revue."""
+    wb = openpyxl.load_workbook(chemin_source, data_only=True)
+    nom_aba_bpu = next((n for n in wb.sheetnames if pt._normalise(n).startswith("bpu")), None)
+    if not nom_aba_bpu:
+        raise CauseFormatInvalide(
+            "ONGLET_MANQUANT", f"Aucun onglet 'BPU - LOT N' trouvé dans {chemin_source}.",
+        )
+    ws = wb[nom_aba_bpu]
+
+    fournisseur = _fournisseur_depuis_nom_fichier_bpu(
+        nom_fichier_pour_fournisseur or chemin_source)
+
+    manquantes = [nom for nom in ("desig", "unite min", "prix")
+                  if _trouve_colonne_entete_bpu(ws, 3, nom.split()[0]) is None]
+    if manquantes:
+        raise CauseFormatInvalide(
+            "COLONNE_OBLIGATOIRE_ABSENTE",
+            f"Colonnes essentielles introuvables dans « {nom_aba_bpu} » ({chemin_source}).",
+            onglet=nom_aba_bpu, colonne=", ".join(manquantes), cellule="ligne 3",
+        )
+
+    col_origine = (_trouve_colonne_entete_bpu(ws, 3, "provenance")
+                   or _trouve_colonne_entete_bpu(ws, 3, "origine"))
+    col_bio = _trouve_colonne_entete_bpu(ws, 3, "bio")
+    col_label = _trouve_colonne_entete_bpu(ws, 3, "label eligible")
+    col_allergenes = _trouve_colonne_entete_bpu(ws, 3, "allergen")
+
+    lignes = []
+    avertissements = []
+    for r in range(5, ws.max_row + 1):
+        designation = ws.cell(row=r, column=3).value
+        if not designation:
+            continue
+        famille = ws.cell(row=r, column=2).value
+        desig_fourn = ws.cell(row=r, column=4).value
+        reference = ws.cell(row=r, column=5).value
+        tva = ws.cell(row=r, column=6).value
+        prix_min = ws.cell(row=r, column=7).value
+        unite_min_brute = ws.cell(row=r, column=8).value
+        prix_vente_brut = ws.cell(row=r, column=9).value
+        unite_vente_brute = ws.cell(row=r, column=10).value
+        conditionnement = ws.cell(row=r, column=13).value
+
+        unite_ref, poids = _unite_reference_et_poids_bpu(unite_min_brute)
+        unite_cmd, prix_cmd, commentaire_vente = _unite_et_prix_vente_bpu(
+            unite_ref, _arrondi_prix(prix_min), unite_vente_brute, prix_vente_brut, conditionnement)
+        if commentaire_vente:
+            avertissements.append((r, designation, commentaire_vente))
+
+        bio = "X" if col_bio and pt._normalise(ws.cell(row=r, column=col_bio).value) in ("oui", "x") else None
+        label = ws.cell(row=r, column=col_label).value if col_label else None
+        origine = ws.cell(row=r, column=col_origine).value if col_origine else None
+
+        allergenes = {nom: None for nom in pt.ALLERGENES}
+        if col_allergenes:
+            for i, nom in enumerate(ALLERGENES_ATTENDUS_BPU):
+                v = ws.cell(row=r, column=col_allergenes + i).value
+                if v and pt._normalise(v) in ("x", "o", "oui"):
+                    allergenes[pt.ALLERGENES[i]] = "o"
+
+        ligne = pg._ligne_vide_de_base(
+            fournisseur=fournisseur, lot=famille, designation=designation, unite_ref=unite_ref,
+            poids=poids, commentaire_unite=None, cond=conditionnement,
+            desig_fourn=desig_fourn, ref=reference, prix_ref=_arrondi_prix(prix_min),
+            unite_cmd=unite_cmd, prix_cmd=_arrondi_prix(prix_cmd), local=None, bio=bio,
+            label=label, origine=origine, commentaire_origine=None, marche=None,
+        )
+        ligne["allergenes"] = allergenes
+        ligne["tva"] = tva
+        lignes.append(ligne)
+
+    nb_lignes = pt.ecrit_classeur_canonique(lignes, chemin_sortie, nom_aba_bpu)
+    return nb_lignes, avertissements
+
+
 def transforme_fichier_connu(chemin_source, chemin_sortie, cle_registre):
     """Transforme UN SEUL fichier déjà reconnu par trouve_entree_connue — le pendant, pour les
     5 familles de a_formater/, de transforme_fichier_grada_auto (pretraitement_auto.py) pour
