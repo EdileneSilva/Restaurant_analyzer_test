@@ -1210,7 +1210,7 @@ SIGLES_UNITE_VENTE_BPU = {
     # famille de fichiers, n'affecte rien ailleurs).
     "ba": "BARQUETTE", "bid": "BIDON", "bte": "BOITE", "bt": "BOITE", "ct": "CARTON",
     "paq": "PAQUET", "pch": "Poche", "sea": "SEAU", "pl": "PLATEAU",
-    "pi": "PIECE", "po": "PIECE", "st": "SACHET", "sh": "SACHET", "bcl": "Bocal",
+    "pi": "PIECE", "po": "PIECE", "st": "SACHET", "sh": "SACHET", "sa": "SACHET", "bcl": "Bocal",
     "col": "Colis", "flc": "Flacon", "brq": "Brique",
     # Déjà en toutes lettres dans certains fichiers (pas des sigles à proprement parler),
     # gardés ici pour une seule recherche normalisée : juste la bonne casse.
