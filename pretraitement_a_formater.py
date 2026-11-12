@@ -1308,6 +1308,21 @@ ALLERGENES_ATTENDUS_BPU = ["Gluten", "Crustacés", "Oeufs", "Poissons", "Arachid
 
 RE_FOURNISSEUR_NOM_FICHIER_BPU = re.compile(r"^(.*?)\s*-\s*lot\s*\d+", re.I)
 
+# "Local" déduit de la Provenance : demandé par l'utilisatrice le 2026-11-12 pour cette famille
+# de fichiers (CD45 = Conseil départemental du Loiret) — toute mention de "Loire" (Loiret,
+# Indre-et-Loire, Pays de la Loire, "maraîchers loirétains"...) OU "Loir et Cher"/"Loir-et-Cher"
+# (département voisin, nom différent de "Loire" mais inclus explicitement à sa demande) marque
+# Local = 'X'. Recherche sur le texte normalisé (sans accents/casse), car la Provenance de ces
+# fichiers est souvent une liste d'ingrédients ("Artichauts - Espagne; eau - Espagne..."), donc
+# "loire"/"loir et cher" peuvent apparaître n'importe où dans le texte, pas juste au début.
+RE_ORIGINE_LOCALE_BPU = re.compile(r"loire|loir\s*-?\s*et\s*-?\s*cher", re.I)
+
+
+def _local_depuis_provenance_bpu(origine):
+    if not origine:
+        return None
+    return "X" if RE_ORIGINE_LOCALE_BPU.search(pt._normalise(origine)) else None
+
 
 def _fournisseur_depuis_nom_fichier_bpu(nom_fichier):
     """Le nom du fournisseur n'est écrit NULLE PART dans ces fichiers (ni Page de Garde, ni
@@ -1362,6 +1377,7 @@ def transforme_bpu_dqe_webgerest_cd45(chemin_source, chemin_sortie, nom_fichier_
         designation = ws.cell(row=r, column=3).value
         if not designation:
             continue
+        marche = ws.cell(row=r, column=1).value
         famille = ws.cell(row=r, column=2).value
         desig_fourn = ws.cell(row=r, column=4).value
         reference = ws.cell(row=r, column=5).value
@@ -1381,6 +1397,7 @@ def transforme_bpu_dqe_webgerest_cd45(chemin_source, chemin_sortie, nom_fichier_
         bio = "X" if col_bio and pt._normalise(ws.cell(row=r, column=col_bio).value) in ("oui", "x") else None
         label = ws.cell(row=r, column=col_label).value if col_label else None
         origine = ws.cell(row=r, column=col_origine).value if col_origine else None
+        local = _local_depuis_provenance_bpu(origine)
 
         allergenes = {nom: None for nom in pt.ALLERGENES}
         if col_allergenes:
@@ -1393,8 +1410,8 @@ def transforme_bpu_dqe_webgerest_cd45(chemin_source, chemin_sortie, nom_fichier_
             fournisseur=fournisseur, lot=famille, designation=designation, unite_ref=unite_ref,
             poids=poids, commentaire_unite=None, cond=conditionnement,
             desig_fourn=desig_fourn, ref=reference, prix_ref=_arrondi_prix(prix_min),
-            unite_cmd=unite_cmd, prix_cmd=_arrondi_prix(prix_cmd), local=None, bio=bio,
-            label=label, origine=origine, commentaire_origine=None, marche=None,
+            unite_cmd=unite_cmd, prix_cmd=_arrondi_prix(prix_cmd), local=local, bio=bio,
+            label=label, origine=origine, commentaire_origine=None, marche=marche,
         )
         ligne["allergenes"] = allergenes
         ligne["tva"] = tva
