@@ -183,10 +183,14 @@ RE_QUANTITE_DESIGNATION = re.compile(rf"([\d,.]+)\s*({_UNITES_REGEX})(?![a-wyzà
 # correspond bien au conditionnement et au ratio, ce n'est pas à elle de connaître le code
 # officiel de la base — on ne touche à rien.
 motor.CONTENANT_ABREGE = {
+    # Casse exacte vérifiée le 2026-11-12 contre la liste officielle fournie par
+    # l'utilisatrice (capture d'écran de la feuille "Unités" du fichier de référence métier) :
+    # presque tout est en MAJUSCULES, SAUF "Poche" et "Unité" (voir EQUIVALENTS_OFFICIELS_BASE
+    # plus bas) — seule la 1ère lettre en majuscule.
     "sac": "SAC", "piece": "PIECE", "seau": "SEAU",
     "barquette": "BARQUETTE", "barq": "BARQUETTE", "bq": "BARQUETTE",
     "bidon": "BIDON", "pot": "POT", "sachet": "SACHET",
-    "carton": "CARTON", "poche": "POCHE", "bouteille": "BOUTEILLE", "bouteile": "BOUTEILLE",
+    "carton": "CARTON", "poche": "Poche", "bouteille": "BOUTEILLE", "bouteile": "BOUTEILLE",
     "boite": "BOITE", "boîte": "BOITE",
     "plateau": "PLATEAU", "paquet": "PAQUET", "botte": "BOTTE",
     "colis": "COLIS", "cageot": "CAGEOT", "caisse": "CAISSE", "filet": "FILET",
@@ -204,9 +208,9 @@ motor.CONTENANT_ABREGE = {
 EQUIVALENTS_OFFICIELS_BASE = {
     "colis": "CARTON", "cageot": "PLATEAU", "caisse": "CARTON", "filet": "SAC",
     "etui": "PAQUET", "étui": "PAQUET", "plaque": "PLATEAU", "pack": "LOT",
-    "brique": "UNITÉ", "coffret": "BOITE", "clayette": "PLATEAU", "gourde": "SACHET",
+    "brique": "Unité", "coffret": "BOITE", "clayette": "PLATEAU", "gourde": "SACHET",
     "bocal": "POT", "outre": "BIDON", "flacon": "BOUTEILLE", "plaquette": "PLATEAU",
-    "tube": "UNITÉ", "bombe": "UNITÉ", "bac": "BOITE",
+    "tube": "Unité", "bombe": "Unité", "bac": "BOITE",
 }
 
 # Abréviations déjà utilisées telles quelles dans certains fichiers sources (ex: le fichier

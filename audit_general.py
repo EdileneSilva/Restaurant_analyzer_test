@@ -174,20 +174,24 @@ RE_QUANTITE_DESIGNATION = re.compile(rf"([\d,.]+)\s*({_UNITES_REGEX})(?![a-wyzà
 # de référence n'y touche jamais (voir plus haut dans ce fichier : son vocabulaire reste
 # volontairement simple, PC/KG/L, jamais un nom de contenant).
 motor.CONTENANT_ABREGE = {
-    # Déjà acceptés par la base : mot gardé tel quel.
+    # Déjà acceptés par la base : mot gardé tel quel. Casse exacte vérifiée le 2026-11-12
+    # contre la liste officielle fournie par l'utilisatrice (capture d'écran de la feuille
+    # "Unités" du fichier de référence métier) : presque tout est en MAJUSCULES, SAUF
+    # "Poche" et "Unité" (seule la 1ère lettre en majuscule) — corrigé ici (c'était "POCHE"/
+    # "UNITÉ" avant, jamais vérifié lettre par lettre jusque-là).
     "sac": "SAC", "piece": "PIECE", "seau": "SEAU",
     "barquette": "BARQUETTE", "barq": "BARQUETTE", "bq": "BARQUETTE",
     "bidon": "BIDON", "pot": "POT", "sachet": "SACHET",
-    "carton": "CARTON", "poche": "POCHE", "bouteille": "BOUTEILLE", "bouteile": "BOUTEILLE",
+    "carton": "CARTON", "poche": "Poche", "bouteille": "BOUTEILLE", "bouteile": "BOUTEILLE",
     "boite": "BOITE", "boîte": "BOITE",
     "plateau": "PLATEAU", "paquet": "PAQUET", "botte": "BOTTE",
     # Non reconnus par la base : remplacés par l'équivalent officiel
     # (unites_commande_non_reconnues.xlsx).
     "colis": "CARTON", "cageot": "PLATEAU", "caisse": "CARTON", "filet": "SAC",
     "etui": "PAQUET", "étui": "PAQUET", "plaque": "PLATEAU", "pack": "LOT",
-    "brique": "UNITÉ", "coffret": "BOITE", "clayette": "PLATEAU", "gourde": "SACHET",
+    "brique": "Unité", "coffret": "BOITE", "clayette": "PLATEAU", "gourde": "SACHET",
     "bocal": "POT", "outre": "BIDON", "flacon": "BOUTEILLE", "plaquette": "PLATEAU",
-    "tube": "UNITÉ", "bombe": "UNITÉ", "bac": "BOITE",
+    "tube": "Unité", "bombe": "Unité", "bac": "BOITE",
 }
 
 # Abréviations déjà utilisées telles quelles dans certains fichiers sources (ex: le fichier

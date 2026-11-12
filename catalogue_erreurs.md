@@ -995,7 +995,34 @@ une bordure fine complète sur toutes les lignes de données, et la même police
 fond que les colonnes voisines sur l'en-tête. Aucun changement de total de non-régression sur
 les 7 fichiers de référence (chemin de code non concerné, déjà complets).
 
-## Jeu de référence (pour TT-09)
+### 59. Casse exacte de deux mots acceptés par la base ("Poche"/"Unité"), jamais vérifiée lettre par lettre
+
+En préparant la transformation d'une nouvelle famille de fichiers bruts (13 fichiers "BPU DQE"
+pour l'intégration Webgerest CD45), l'utilisatrice a fourni une capture d'écran de la liste
+officielle complète des unités acceptées par la base (feuille "Unités" du fichier de référence
+métier, déjà citée dans plusieurs règles ci-dessus mais jamais confrontée lettre par lettre à
+ce qu'écrit `CONTENANT_ABREGE`). Comparaison faite le 2026-11-12 : presque tout est bien en
+MAJUSCULES dans le code (confirmé correct, y compris "BOITE" sans accent), mais deux mots
+étaient faux :
+- "Poche" (seule la 1ère lettre en majuscule) — le code écrivait "POCHE".
+- "Unité" (seule la 1ère lettre en majuscule, avec l'accent) — le code écrivait "UNITÉ" (utilisé
+  pour "brique"/"tube"/"bombe", les contenants remplacés par cet équivalent officiel).
+
+Corrigé dans `audit_general.py` (`CONTENANT_ABREGE`) et `audit_general_commentaires.py`
+(`CONTENANT_ABREGE` et `EQUIVALENTS_OFFICIELS_BASE`). Un 3e cas examiné mais PAS corrigé :
+"BIDON" — la liste officielle affiche "BIDON 10 L", mais l'utilisatrice a confirmé que les
+suffixes de taille/format listés avec certains mots (ex: aussi "BOITE 3/1", "BOITE 4/1") sont
+censés rester dans le Conditionnement, pas être recopiés dans l'Unité de commande — le code
+écrivait déjà "BIDON" tout court, donc rien à changer ici. **Exception confirmée par
+l'utilisatrice** : la règle n°34 ("BOITE 5/1"/"BOITE 3/1"/"BOITE 4/4", `reconsidere_format_boite`)
+reste inchangée malgré cette clarification générale — ces formats de boîte de conserve sont
+traités comme des codes à part entière acceptés par la base, pas comme "BOITE" + une taille à
+retirer, décision déjà validée avant et reconfirmée explicitement ici.
+
+Validé : les 2 suites de non-régression concernées (`audit_general`/`audit_commentaires` —
+`CONTENANT_ABREGE` n'intervient pas dans le prétraitement) passent sans changement de total (la
+casse de ces deux mots ne change aucune décision de couleur/colonne, seulement le texte final
+écrit).
 
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
