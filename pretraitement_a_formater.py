@@ -1204,7 +1204,11 @@ SIGLES_UNITE_VENTE_BPU = {
     # de cette liste (Bocal/Colis/Flacon/Brique, toujours en attente de permission).
     # "po" (confirmé par l'utilisatrice -> PIECE, vu sur BPF Lot 5 : fromages en portions
     # individuelles préemballées, ex: "Camembert préamballé 30g").
-    "ba": "BARQUETTE", "bid": "BIDON", "bte": "BOITE", "ct": "CARTON",
+    # "bt" (confirmé par l'utilisatrice -> BOITE, vu sur SYSCO Lot 4 : assortiments de
+    # mignardises/macarons/petits fours/verrines — pas des liquides, donc pas "bouteille" malgré
+    # "bt"/"bt."="bouteille" dans le reste du projet, motor.CATEGORIES_COMMANDE — propre à cette
+    # famille de fichiers, n'affecte rien ailleurs).
+    "ba": "BARQUETTE", "bid": "BIDON", "bte": "BOITE", "bt": "BOITE", "ct": "CARTON",
     "paq": "PAQUET", "pch": "Poche", "sea": "SEAU", "pl": "PLATEAU",
     "pi": "PIECE", "po": "PIECE", "st": "SACHET", "sh": "SACHET", "bcl": "Bocal",
     "col": "Colis", "flc": "Flacon", "brq": "Brique",
@@ -1394,7 +1398,10 @@ def _unite_et_prix_vente_bpu(unite_ref, prix_min, unite_vente_brute, prix_vente_
         )
         return None, prix_vente, (commentaire + " " + texte if commentaire else texte)
 
-    sigle = pt._normalise(unite_vente)
+    # "BT." (avec un point final, vu sur POMONA Lot 7/8 — ex: "Arôme café 1L") doit matcher le
+    # même sigle que "bt" sans point : trouvé le 2026-11-12, le point empêchait la comparaison
+    # et faisait ressortir "Bt" recopié tel quel au lieu de "BOITE".
+    sigle = pt._normalise(unite_vente).rstrip(".")
     mot_connu = SIGLES_UNITE_VENTE_BPU.get(sigle)
     if mot_connu:
         return mot_connu, prix_vente, commentaire
