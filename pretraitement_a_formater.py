@@ -1212,6 +1212,14 @@ SIGLES_UNITE_VENTE_BPU = {
 
 RE_PREMIER_MOT_BPU = re.compile(r"^\s*([A-Za-zÀ-ÿ]+)")
 
+# "x6bt", "x24pc"... : AUCUN nom de contenant écrit, juste "x" + nombre + sigle abrégé — trouvé
+# sur LOGIFRAIS Lot 13, lignes 10/12 (Conditionnement 'x6bt'), à côté de lignes du même type de
+# produit où c'est écrit en toutes lettres ('Carton 6 bouteilles') : l'utilisatrice a confirmé
+# le 2026-11-12 que ce format bref désigne la même chose (un carton regroupant N unités) et
+# doit donner 'Carton', pas le 'X' qu'un simple "premier mot alphabétique" y trouverait sinon
+# (le 'x' du multiplicateur, pris à tort pour un mot).
+RE_MULTIPLICATEUR_NU_BPU = re.compile(r"^x\s*\d+\s*[a-zÀ-ÿ]*$", re.I)
+
 
 def _mot_recipient_conditionnement_bpu(conditionnement):
     """Premier mot du Conditionnement (ex: 'Bib 10kg' -> 'Bib', 'Carton de 6 boutelles' ->
@@ -1221,8 +1229,41 @@ def _mot_recipient_conditionnement_bpu(conditionnement):
     audit_general.py, dangereux — voir catalogue_erreurs.md, bug n°41)."""
     if not conditionnement:
         return None
-    m = RE_PREMIER_MOT_BPU.match(str(conditionnement))
+    texte = str(conditionnement).strip()
+    if RE_MULTIPLICATEUR_NU_BPU.match(texte):
+        return "Carton"
+    m = RE_PREMIER_MOT_BPU.match(texte)
     return m.group(1).capitalize() if m else None
+
+
+RE_MOT_UNITE_CMD_BPU = re.compile(r"[A-Za-zÀ-ÿ]+")
+
+# Mots à ignorer en cherchant LE mot-contenant dans une phrase descriptive : connecteurs
+# ('de'...), approximation ('environ'/'env'), et les unités de mesure elles-mêmes (kg/g/l...),
+# qui ne sont jamais le contenant (ex: dans '5 kg', seul mot alphabétique présent, il n'y a
+# justement AUCUN contenant nommé — repli sur le Conditionnement dans ce cas, voir plus bas).
+MOTS_IGNORES_UNITE_CMD_BPU = {
+    "de", "du", "des", "environ", "env",
+    "kg", "kilo", "kilos", "kilogramme", "g", "gr", "gramme", "l", "litre", "ml", "cl",
+}
+
+
+def _nettoie_unite_cmd_bpu(unite_cmd, conditionnement=None):
+    """Unité de commande ne doit jamais contenir de chiffre (demandé explicitement le
+    2026-11-12) : si la valeur trouvée est en réalité une phrase descriptive ('Bidon de 5L',
+    'Carton de 6 bt', 'Barquette 1,5 kg', '5 pots de 500g'), ne garde que le mot-contenant
+    (toujours le niveau EXTÉRIEUR/le premier quand plusieurs sont décrits, ex: 'Carton de 6
+    bt' -> 'Carton', pas 'bt'). Un mot déjà propre et seul (ex: 'KG', sorti du sigle 'bt'/
+    'pc'/... — voir SIGLES_UNITE_VENTE_BPU) ressort inchangé, sans recapitaliser. Si la phrase
+    n'a AUCUN mot-contenant du tout (ex: '5 kg', juste une quantité) : repli sur le premier mot
+    du Conditionnement, comme pour le cas du multiplicateur nu (_unite_et_prix_vente_bpu)."""
+    if not unite_cmd:
+        return unite_cmd
+    texte = str(unite_cmd).strip()
+    for mot in RE_MOT_UNITE_CMD_BPU.findall(texte):
+        if pt._normalise(mot) not in MOTS_IGNORES_UNITE_CMD_BPU:
+            return texte if mot == texte else mot.capitalize()
+    return _mot_recipient_conditionnement_bpu(conditionnement) or unite_cmd
 
 
 def _unite_reference_bpu(unite_min_brute):
@@ -1440,6 +1481,7 @@ def transforme_bpu_dqe_webgerest_cd45(chemin_source, chemin_sortie, nom_fichier_
         poids = _poids_piece_bpu(unite_ref, conditionnement, designation)
         unite_cmd, prix_cmd, commentaire_vente = _unite_et_prix_vente_bpu(
             unite_ref, _arrondi_prix(prix_min), unite_vente_brute, prix_vente_brut, conditionnement)
+        unite_cmd = _nettoie_unite_cmd_bpu(unite_cmd, conditionnement)
         if commentaire_vente:
             avertissements.append((r, designation, commentaire_vente))
 
