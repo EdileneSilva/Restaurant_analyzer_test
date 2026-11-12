@@ -1196,13 +1196,20 @@ def _est_nombre_bpu(valeur):
 # officielle de CONTENANT_ABREGE (audit_general.py) — demandé explicitement par l'utilisatrice
 # le 2026-11-12, tant qu'elle n'a pas la permission de faire ce choix métier.
 SIGLES_UNITE_VENTE_BPU = {
-    "ba": "Barquette", "bid": "Bidon", "bte": "Boîte", "ct": "Carton",
+    # "PIECE" et "BARQUETTE" tout en majuscules (sans accent pour PIECE), demandé
+    # explicitement le 2026-11-12 pour matcher la casse exacte de la liste officielle des
+    # unités acceptées (capture d'écran fournie par l'utilisatrice — voir aussi la correction
+    # "Poche"/"Unité" dans CONTENANT_ABREGE, audit_general.py) — uniformité voulue, PAS encore
+    # la substitution officielle pour les autres mots (toujours en attente de permission).
+    # "po" (confirmé par l'utilisatrice -> PIECE, vu sur BPF Lot 5 : fromages en portions
+    # individuelles préemballées, ex: "Camembert préamballé 30g").
+    "ba": "BARQUETTE", "bid": "Bidon", "bte": "Boîte", "ct": "Carton",
     "paq": "Paquet", "pch": "Poche", "sea": "Seau", "pl": "Plateau",
-    "pi": "Pièce", "st": "Sachet", "sh": "Sachet", "bcl": "Bocal",
+    "pi": "PIECE", "po": "PIECE", "st": "Sachet", "sh": "Sachet", "bcl": "Bocal",
     "col": "Colis", "flc": "Flacon", "brq": "Brique",
     # Déjà en toutes lettres dans certains fichiers (pas des sigles à proprement parler),
     # gardés ici pour une seule recherche normalisée : juste la bonne casse.
-    "sac": "Sac", "kg": "KG", "pc": "Pièce", "pu": "Pièce", "pot": "Pot",
+    "sac": "Sac", "kg": "KG", "pc": "PIECE", "pu": "PIECE", "pot": "Pot",
 }
 
 # "BIB" (Bag-in-Box, confirmé via "Bib de 5 L"/"Bib 10kg" dans le Conditionnement) n'a aucun
@@ -1248,6 +1255,18 @@ MOTS_IGNORES_UNITE_CMD_BPU = {
 }
 
 
+# "PIECE"/"BARQUETTE" tout en majuscules partout où ce mot ressort, quel que soit le chemin
+# emprunté (sigle développé, mot repris tel quel, ou repli sur le Conditionnement) — demandé
+# explicitement le 2026-11-12 pour matcher la casse exacte de la liste officielle des unités
+# acceptées, même logique que SIGLES_UNITE_VENTE_BPU plus haut.
+MOTS_MAJUSCULES_UNITE_CMD_BPU = {"piece": "PIECE", "barquette": "BARQUETTE"}
+
+
+def _casse_officielle_unite_cmd_bpu(mot):
+    norm = pt._normalise(mot).rstrip("s")  # tolère le pluriel ("Barquettes" -> "barquette")
+    return MOTS_MAJUSCULES_UNITE_CMD_BPU.get(norm, mot)
+
+
 def _nettoie_unite_cmd_bpu(unite_cmd, conditionnement=None):
     """Unité de commande ne doit jamais contenir de chiffre (demandé explicitement le
     2026-11-12) : si la valeur trouvée est en réalité une phrase descriptive ('Bidon de 5L',
@@ -1262,8 +1281,8 @@ def _nettoie_unite_cmd_bpu(unite_cmd, conditionnement=None):
     texte = str(unite_cmd).strip()
     for mot in RE_MOT_UNITE_CMD_BPU.findall(texte):
         if pt._normalise(mot) not in MOTS_IGNORES_UNITE_CMD_BPU:
-            return texte if mot == texte else mot.capitalize()
-    return _mot_recipient_conditionnement_bpu(conditionnement) or unite_cmd
+            return _casse_officielle_unite_cmd_bpu(texte if mot == texte else mot.capitalize())
+    return _casse_officielle_unite_cmd_bpu(_mot_recipient_conditionnement_bpu(conditionnement) or unite_cmd)
 
 
 def _unite_reference_bpu(unite_min_brute):
