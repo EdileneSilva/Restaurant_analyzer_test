@@ -1225,21 +1225,53 @@ def _mot_recipient_conditionnement_bpu(conditionnement):
     return m.group(1).capitalize() if m else None
 
 
-def _unite_reference_et_poids_bpu(unite_min_brute):
-    """'Unité minimum' (colonne H) -> (Unité de référence, Poids). Vu dans les 13 fichiers :
-    'Kg'/'L'/'Pièce' presque partout (-> KG/L/PC, pas de poids connu par pièce à ce stade) ;
-    APAGEH Lot 12 écrit '1 kg' partout (équivalent à 'Kg') ; POMONA Lot 7 a quelques lignes où
-    c'est déjà un nom de contenant ('Colis', 'Boîte') — recopié tel quel pour l'instant (pas de
-    règle PC/PAQUET appliquée ici, qui est du ressort de l'audit, pas de cette transformation)."""
+def _unite_reference_bpu(unite_min_brute):
+    """'Unité minimum' (colonne H) -> Unité de référence. Vu dans les 13 fichiers : 'Kg'/'L'/
+    'Pièce' presque partout (-> KG/L/PC) ; APAGEH Lot 12 écrit '1 kg' partout (équivalent à
+    'Kg') ; POMONA Lot 7 a quelques lignes où c'est déjà un nom de contenant ('Colis',
+    'Boîte') — recopié tel quel pour l'instant (pas de règle PC/PAQUET appliquée ici, qui est
+    du ressort de l'audit, pas de cette transformation)."""
     norm = pt._normalise(unite_min_brute)
     norm = re.sub(r"^1\s*", "", norm)  # "1 kg" -> "kg" (APAGEH)
     if norm in ("kg", "kilo", "kilogramme"):
-        return "KG", None
+        return "KG"
     if norm in ("l", "litre"):
-        return "L", None
+        return "L"
     if norm in ("piece", "pièce", "pc"):
-        return "PC", None
-    return str(unite_min_brute).strip(), None
+        return "PC"
+    return str(unite_min_brute).strip()
+
+
+# "Poids à l'unité de référence" : demandé explicitement par l'utilisatrice le 2026-11-12 pour
+# tout ce qui n'est PAS kg/L (PC, ou un nom de contenant comme 'Colis'/'Boîte') — cherché
+# d'abord dans le Conditionnement ("N x poids unité", ex: "1x500g" -> poids de LA pièce
+# décrite = 0.5 kg, via pt._n_cond_et_poids, déjà utilisé ailleurs pour ce même motif), sinon
+# dans la Désignation de l'article (poids nu en fin de texte, ex: "Camembert préamballé 30g",
+# "Jambon cru... tranché 25g env." — le "env." n'empêche pas de lire le nombre, c'est la
+# valeur donnée par la source, pas une estimation inventée ici).
+RE_POIDS_NU_DESIGNATION_BPU = re.compile(r"(\d+[,.]?\d*)\s*(kg|kilo|g|gr|gramme)\b", re.I)
+
+
+def _poids_depuis_designation_bpu(designation):
+    if not designation:
+        return None
+    dernier = None
+    for m in RE_POIDS_NU_DESIGNATION_BPU.finditer(str(designation)):
+        dernier = m
+    if not dernier:
+        return None
+    valeur = float(dernier.group(1).replace(",", "."))
+    unite = dernier.group(2).lower()
+    return round(valeur / 1000, 4) if unite in ("g", "gr", "gramme") else round(valeur, 4)
+
+
+def _poids_piece_bpu(unite_ref, conditionnement, designation):
+    if unite_ref in ("KG", "L"):
+        return None
+    _n, poids = pt._n_cond_et_poids(conditionnement)
+    if poids is not None:
+        return round(poids, 4)
+    return _poids_depuis_designation_bpu(designation)
 
 
 def _unite_et_prix_vente_bpu(unite_ref, prix_min, unite_vente_brute, prix_vente_brute, conditionnement):
@@ -1404,7 +1436,8 @@ def transforme_bpu_dqe_webgerest_cd45(chemin_source, chemin_sortie, nom_fichier_
         unite_vente_brute = ws.cell(row=r, column=10).value
         conditionnement = ws.cell(row=r, column=13).value
 
-        unite_ref, poids = _unite_reference_et_poids_bpu(unite_min_brute)
+        unite_ref = _unite_reference_bpu(unite_min_brute)
+        poids = _poids_piece_bpu(unite_ref, conditionnement, designation)
         unite_cmd, prix_cmd, commentaire_vente = _unite_et_prix_vente_bpu(
             unite_ref, _arrondi_prix(prix_min), unite_vente_brute, prix_vente_brut, conditionnement)
         if commentaire_vente:
