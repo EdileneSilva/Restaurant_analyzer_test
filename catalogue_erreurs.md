@@ -1024,6 +1024,31 @@ Validé : les 2 suites de non-régression concernées (`audit_general`/`audit_co
 casse de ces deux mots ne change aucune décision de couleur/colonne, seulement le texte final
 écrit).
 
+### 60. Taille des bulles de commentaire Excel, jusque-là fixe et trop petite pour le texte
+
+Demandé par l'utilisatrice le 2026-11-13, pour la personne du métier qui relit les fichiers
+audités : openpyxl pose une taille de bulle FIXE (79 × 144 points) pour tout commentaire créé
+avec `Comment(...)`, quel que soit le texte — beaucoup trop petit dès qu'un commentaire dépasse
+une ou deux courtes phrases, ce qui est fréquent ici (plusieurs règles peuvent accumuler
+plusieurs messages sur la même cellule, séparés par une ligne vide). Résultat avant correction :
+la personne devait agrandir la bulle à la main à chaque fois pour lire le texte en entier au
+survol.
+
+Corrigé en calculant la taille (largeur fixe 320 points, hauteur proportionnelle au nombre de
+lignes estimées, 58 caractères par ligne à cette largeur) à chaque fois qu'un commentaire est
+posé OU complété — centralisé dans une nouvelle fonction `_pose_commentaire()` (`audit_general.py`,
+`audit_general_commentaires.py`, `pretraitement.py`), qui remplace tous les endroits qui
+créaient/complétaient un commentaire à la main (dont `marque()`, le point d'entrée le plus
+utilisé). `pretraitement_a_formater.py` réutilise `pt._pose_commentaire` au lieu d'une 4e copie.
+
+Validé sur un fichier réel (`2026 09 22 Base article groupement 1.xlsx`) : 686 commentaires
+posés par l'audit ont tous une largeur de 320 (au lieu de 144), et une hauteur qui grandit bien
+avec le texte (79 pour les plus courts, jusqu'à 188 pour un commentaire de 687 caractères) — les
+deux commentaires du MODÈLE lui-même (déjà présents dans le fichier source, en ligne 2
+d'en-tête, jamais touchés par ce code) restent à la taille d'origine, comme attendu. Les 3
+suites de non-régression passent sans changement de total (la taille de la bulle n'influence
+aucune décision de couleur/colonne).
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du

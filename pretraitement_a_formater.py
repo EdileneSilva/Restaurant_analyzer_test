@@ -550,7 +550,7 @@ def _ajoute_commentaires_local(chemin_sortie, lignes):
     wb = openpyxl.load_workbook(chemin_sortie)
     ws = wb.active
     for i, commentaire in a_commenter:
-        ws.cell(row=i + 3, column=pt.COL_LOCAL).comment = Comment(commentaire, "audit_general")
+        pt._pose_commentaire(ws.cell(row=i + 3, column=pt.COL_LOCAL), commentaire)
     wb.save(chemin_sortie)
 
 

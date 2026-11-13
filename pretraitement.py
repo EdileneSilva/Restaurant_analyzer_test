@@ -400,6 +400,23 @@ def _ecrit(ws, r, c, valeur):
     return ws.cell(row=r, column=c, value=valeur)
 
 
+def _dimensions_commentaire(texte):
+    """Taille de bulle de commentaire Excel adaptée à la longueur du texte — demandé par
+    l'utilisatrice le 2026-11-13 : la personne qui ouvre le fichier doit voir le texte COMPLET
+    tout de suite en survolant la cellule, sans avoir à agrandir la bulle à la main à chaque
+    fois. openpyxl pose sinon une taille fixe (79 x 144 points) quel que soit le texte."""
+    largeur = 320
+    caracteres_par_ligne = 58
+    nb_lignes = sum(max(1, -(-len(p) // caracteres_par_ligne)) for p in texte.split("\n"))
+    hauteur = max(79, nb_lignes * 14 + 20)
+    return largeur, hauteur
+
+
+def _pose_commentaire(cel, texte):
+    cel.comment = Comment(texte, "audit_general")
+    cel.comment.width, cel.comment.height = _dimensions_commentaire(texte)
+
+
 def _applique_grille_complete(ws, premiere_ligne, derniere_ligne):
     """Applique police + bordure + alignement à TOUTES les cellules de la
     zone de données (remplies ou non), comme dans les fichiers raw_data/ où
@@ -539,7 +556,7 @@ def ecrit_classeur_canonique(lignes, chemin_sortie, nom_feuille):
         _ecrit(ws_dst, r, COL_DESIGNATION, ligne["designation"])
         cel_unite_ref = _ecrit(ws_dst, r, COL_UNITE_REF, ligne["unite_ref"])
         if ligne["commentaire_unite"]:
-            cel_unite_ref.comment = Comment(ligne["commentaire_unite"], "audit_general")
+            _pose_commentaire(cel_unite_ref, ligne["commentaire_unite"])
         if ligne["poids"] is not None:
             _ecrit(ws_dst, r, COL_POIDS_REF, ligne["poids"])
         _ecrit(ws_dst, r, COL_FOURNISSEUR, ligne["fournisseur"])
@@ -556,7 +573,7 @@ def ecrit_classeur_canonique(lignes, chemin_sortie, nom_feuille):
         cel_origine = _ecrit(ws_dst, r, COL_ORIGINE, ligne["origine"])
         if ligne["commentaire_origine"]:
             cel_origine.fill = COULEUR_ORIGINE_INCERTAINE
-            cel_origine.comment = Comment(ligne["commentaire_origine"], "audit_general")
+            _pose_commentaire(cel_origine, ligne["commentaire_origine"])
 
         for j, nom in enumerate(ALLERGENES):
             _ecrit(ws_dst, r, COL_GLUTEN + j, ligne["allergenes"][nom])

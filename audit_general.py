@@ -2501,6 +2501,32 @@ def construit_indice_prix(dossier_entree):
 AUTEUR_COMMENTAIRE = "Audit de cohérence (lecture seule)"
 COULEUR_DUPLICATA = "FFFF0000"  # rouge plein — toute la ligne, pas juste une cellule
 
+
+def _dimensions_commentaire(texte):
+    """Taille de bulle de commentaire Excel adaptée à la longueur du texte — demandé par
+    l'utilisatrice le 2026-11-13 : la personne qui ouvre le fichier doit voir le texte COMPLET
+    tout de suite en survolant la cellule, sans avoir à agrandir la bulle à la main à chaque
+    fois. openpyxl pose sinon une taille fixe (79 x 144 points) quel que soit le texte, bien
+    trop petite dès qu'un commentaire dépasse une ou deux courtes phrases — fréquent ici, vu
+    que plusieurs règles peuvent s'accumuler sur la même cellule (voir _pose_commentaire)."""
+    largeur = 320  # points — large sans être démesuré
+    caracteres_par_ligne = 58  # estimé pour cette largeur, police par défaut des commentaires
+    nb_lignes = sum(max(1, -(-len(p) // caracteres_par_ligne)) for p in texte.split("\n"))
+    hauteur = max(79, nb_lignes * 14 + 20)
+    return largeur, hauteur
+
+
+def _pose_commentaire(cel, texte):
+    """Crée le commentaire d'une cellule, ou complète le texte d'un commentaire déjà posé par
+    une règle précédente (une même cellule peut accumuler plusieurs messages, séparés par une
+    ligne vide) — centralisé ici pour que la taille de la bulle (_dimensions_commentaire) soit
+    toujours recalculée sur le texte FINAL, quel que soit l'appelant."""
+    if cel.comment:
+        cel.comment.text = cel.comment.text + "\n\n" + texte
+    else:
+        cel.comment = Comment(texte, AUTEUR_COMMENTAIRE)
+    cel.comment.width, cel.comment.height = _dimensions_commentaire(cel.comment.text)
+
 COULEURS_INCOHERENCE = {
     motor.COULEUR_UNITE_TRANSFORMEE,
     motor.COULEUR_A_VERIFIER,
@@ -2544,11 +2570,7 @@ def normalise_ecriture_unite_ref(valeur):
 def marque(cel, couleur, fournisseur_nom, texte):
     cel.fill = PatternFill(start_color=couleur, end_color=couleur, fill_type="solid")
     prefixe = f"[{fournisseur_nom}] " if fournisseur_nom else ""
-    ligne = f"{prefixe}{texte}"
-    if cel.comment:
-        cel.comment.text = cel.comment.text + "\n\n" + ligne
-    else:
-        cel.comment = Comment(ligne, AUTEUR_COMMENTAIRE)
+    _pose_commentaire(cel, f"{prefixe}{texte}")
 
 
 RE_CATEGORIE_LEGUME = re.compile(r"l[ée]gume|verdure|fruit", re.I)
@@ -2744,10 +2766,7 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                 f"('{conditionnement}' contenait une plage du type 'H33:H66') semble avoir été "
                 "collée par erreur au milieu du texte. Valeur nettoyée automatiquement — "
                 "vérifiez qu'elle est bien correcte.")
-            if cel_cond.comment:
-                cel_cond.comment.text = cel_cond.comment.text + "\n\n" + texte
-            else:
-                cel_cond.comment = Comment(texte, AUTEUR_COMMENTAIRE)
+            _pose_commentaire(cel_cond, texte)
             total += 1
             conditionnement = conditionnement_sans_plage
 
@@ -3143,10 +3162,7 @@ def marque_lignes_dupliquees(ws, doublons, col_designation):
         texte = (f"Ligne strictement dupliquée (contenu identique) de la ligne "
                  f"{premiere_occurrence}. Toute la ligne est surlignée en rouge — ce "
                  "script ne supprime rien, à vous de choisir laquelle garder.")
-        if cel.comment:
-            cel.comment.text = cel.comment.text + "\n\n" + texte
-        else:
-            cel.comment = Comment(texte, AUTEUR_COMMENTAIRE)
+        _pose_commentaire(cel, texte)
         total += 1
     return total
 
@@ -3920,9 +3936,10 @@ def traite_feuille(ws, ws_valeurs, info, indice_prix=None):
                 if resultat_texte[2] is not None:
                     cel_poids.fill = PatternFill(start_color=motor.COULEUR_UNITE_TRANSFORMEE,
                                                   end_color=motor.COULEUR_UNITE_TRANSFORMEE, fill_type="solid")
-                    cel_poids.comment = Comment(
+                    _pose_commentaire(
+                        cel_poids,
                         f"Poids à l'unité de référence interprété à partir du texte d'origine "
-                        f"('{poids_ref}') : {quantite_texte}.", AUTEUR_COMMENTAIRE)
+                        f"('{poids_ref}') : {quantite_texte}.")
                     stats["marques"] += 1
                     poids_texte_marque = True
                 poids_ref = quantite_texte
