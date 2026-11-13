@@ -43,7 +43,15 @@ TOTAUX = {
     "2026 09 22 Base article groupement 4.xlsx": (191, 1003),
     "2026 09 22 Base article groupement 5.xlsx": (219, 889),
     "2026 09 22 Base article groupement commun.xlsx": (748, 1299),
-    "MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx": (193, 721),
+    # MDC_IMPORT_MARCHE : (193, 721) -> (191, 704) le 2026-11-13 — demandé par l'utilisatrice :
+    # quand Unité de référence = Unité de commande D'ORIGINE (même mot) ET Prix de référence =
+    # Prix de commande, la quantité lue dans le Conditionnement ne doit plus être traitée comme
+    # un multiplicateur/diviseur obligé du prix (ex: "Rôti de porc... 2,2kg" à 6.19€/kg, D=L=
+    # 'kg', vendu ET commandé au poids — le "2,2kg" du Conditionnement ne fait que décrire la
+    # taille typique de la pièce, pas un contenant à "déplier"). 2 lignes concernées dans ce
+    # fichier (sur ~90 lignes D=L au total, la plupart déjà dans la tolérance avant ce
+    # correctif) ; voir catalogue_erreurs.md, règle n°61.
+    "MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx": (191, 704),
 }
 
 

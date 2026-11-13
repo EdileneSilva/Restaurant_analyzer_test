@@ -1049,6 +1049,94 @@ d'en-tête, jamais touchés par ce code) restent à la taille d'origine, comme a
 suites de non-régression passent sans changement de total (la taille de la bulle n'influence
 aucune décision de couleur/colonne).
 
+### 61. Conditionnement traité comme un diviseur/multiplicateur obligé du prix, même quand Unité de référence = Unité de commande (brutes) et prix déjà identiques
+
+Demandé par l'utilisatrice le 2026-11-13, sur `MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx` :
+des lignes comme "Emincé épaule de porc - sachet 2kg" (BPF Lot 11-style, Unité de référence et
+Unité de commande BRUTES valant toutes les deux "kg", Prix de référence = Prix de commande =
+6,05€, Conditionnement "2kg") étaient signalées à tort — la colonne K (Prix de référence) ET la
+colonne M (Prix de commande) recevaient chacune un message redondant ("deux lectures possibles")
+proposant de diviser/multiplier le prix par le poids lu dans le Conditionnement, alors que
+l'unité de référence et l'unité de commande sont déjà le même mot et que le prix est déjà
+cohérent des deux côtés. Le "2kg" du Conditionnement ne fait ici que décrire le poids typique de
+la pièce vendue au kilo, pas un contenant group dont il faudrait "déplier" le prix.
+
+Règle demandée : quand Unité de référence et Unité de commande (telles qu'écrites dans le
+fichier, avant toute normalisation/substitution) sont le même mot ET que Prix de référence =
+Prix de commande, ne plus proposer de changement de prix basé sur le Conditionnement — seules
+des suggestions d'unité plus précise (KG/L selon le Conditionnement, PIECE, ou PAQUET avec
+Nombre de pièces à remplir) restent pertinentes, jamais un recalcul de prix.
+
+Corrigé dans `_traite_ligne_etendue_nucleo` (`audit_general.py` et
+`audit_general_commentaires.py`, même structure de code dans les deux) : juste après le calcul
+de `k_change = diff_relative > TOLERANCE_RATIO`, ajout d'un garde-fou qui le remet à `False`
+quand `abs(prix_ref - prix_cmd) < 0.005` ET que l'Unité de commande brute normalisée est égale à
+l'Unité de référence brute normalisée. Ce seul changement éteint aussi, par ricochet, le message
+redondant que posait `verifie_coherence_unite_prix_identiques` (règle du 2026-11-09 ci-dessus)
+sur la même cellule, puisque son déclencheur (`resultat.nouveau_k is not None`) devient
+naturellement `False`.
+
+Validé sur les lignes réelles concernées de `MDC_IMPORT_MARCHE` : plus aucun commentaire sur K
+ni sur M pour ces cas. Sur ~90 lignes de ce fichier où Unité de référence = Unité de commande
+(brutes), seules 2 lignes avaient `diff_relative > TOLERANCE_RATIO` et étaient donc réellement
+affectées par ce correctif (les autres étaient déjà dans la tolérance avant, donc invisibles).
+`TOTAUX["MDC_IMPORT_MARCHE..."]` passe de `(193, 721)` à `(191, 704)` dans
+`test_non_regression_audit_general.py`, `TOTAUX_CELLULES["MDC_IMPORT_MARCHE..."]` de `744` à
+`727` dans `test_non_regression_audit_commentaires.py`. Les 6 autres fichiers de référence
+restent strictement identiques (aucune ligne chez eux avec Unité de référence = Unité de
+commande brutes ET prix déjà identiques ET hors tolérance). Les 3 suites de non-régression
+passent ; Docker reconstruit, HTTP 200 vérifié.
+
+### 62. Même contradiction sur un contenant nommé (pas une unité de poids), avec substitution automatique en plus du prix
+
+Signalé par l'utilisatrice le même jour (2026-11-13), cas distinct de la règle n°61 ci-dessus
+bien que de la même famille de symptôme : `POMONA EPISAVEUR - LOT 7`, ligne 60, "Caissettes
+muffin x300" — Unité de référence = Unité de commande (brutes) = "Colis", Prix de référence =
+Prix de commande = 24,89€, Conditionnement "Colis de 300 pièces". Ce cas passe par un chemin de
+code différent de la règle n°61 : le moteur partagé (`first_scripts/first_attempt_v2_prototype.py`,
+branche `PACKAGE_TYPES`, déjà documentée comme règle n°58 non résolue — voir plus haut, les 4
+exemples de cette règle ont Unité de référence ≠ Unité de commande brutes et restent donc hors
+de ce correctif) proposait `nouveau_d="PC"` + un nouveau prix (prix/300) + `nouveau_l` = l'unité
+de référence brute, et la fonction existante `reconsidere_contenant_nombre_pieces` (qui se
+déclenche dès que `nouveau_d=="PC"` et `nouveau_l` == unité de référence brute) renommait ensuite
+L en "CARTON" via la substitution officielle CONTENANT_ABREGE (colis→CARTON, substitution déjà
+établie ailleurs dans ce moteur — pas concernée par la règle mémoire "pas de substitution pour
+Webgerest CD45", qui ne s'applique qu'à l'étape de transformation de cette famille-là, pas à la
+logique propre d'`audit_general.py`).
+
+Demande de l'utilisatrice : annuler entièrement la proposition de prix, ne RIEN renommer (ni D
+ni L), et à la place poser uniquement une question sur D (Unité de référence) — "êtes-vous
+sûr(e) ?" — en suggérant PAQUET (avec Nombre de pièces à remplir) si le Conditionnement révèle un
+comptage de pièces.
+
+Implémenté : nouvelle fonction `reconsidere_contenant_seul_deja_coherent(resultat, unite_ref,
+unite_cmd, conditionnement, prix_ref, prix_cmd)` dans les deux moteurs, appelée en tout premier
+parmi les fonctions `reconsidere_*`, juste après `motor.traite_ligne()` — avant
+`reconsidere_prix_inexplique`, `reconsidere_recipient_de_1_unite`,
+`reconsidere_ratio_un_contre_contenant` et `reconsidere_contenant_nombre_pieces`. Condition :
+`resultat.nouveau_d == "PC"`, `resultat.nouveau_k is not None`, Unité de commande brute
+normalisée == Unité de référence brute normalisée, et prix identiques (±0,005€). Action :
+remet `nouveau_d`/`nouveau_k`/`couleur_k`/`commentaire_k` à `None`, et — point important trouvé
+en déboguant — fixe explicitement `resultat.nouveau_l = unite_ref` (la valeur brute inchangée,
+PAS `None`) : mettre `nouveau_l` à `None` ne suffisait pas, car cela laissait passer
+`reconsidere_mot_litteral_non_reconnu` (garde-fou : `if resultat.nouveau_l is not None: return`),
+une fonction indépendante qui renommait alors L en "CARTON" par son propre chemin, sans rapport
+avec `reconsidere_contenant_nombre_pieces`. Fixer `nouveau_l` à la valeur brute inchangée bloque
+ce garde-fou tout en n'écrivant visuellement aucun changement. Pose `couleur_d =
+motor.COULEUR_A_VERIFIER` et un nouveau commentaire sur D expliquant : unité de référence et de
+commande identiques, même prix, rien à corriger côté prix — mais le Conditionnement pourrait
+justifier PAQUET + Nombre de pièces (compte extrait via `motor.extraire_nombre_pieces` sur le
+Conditionnement, ou suggestion générique KG/L/PC si aucun compte n'est trouvé) ; demande
+explicitement confirmation, rien n'est changé automatiquement.
+
+Validé sur la ligne réelle (`POMONA EPISAVEUR - LOT 7`, ligne 60) : D reste "COLIS" (normalisation
+majuscule déjà existante, sans rapport avec ce correctif) avec la nouvelle question en
+commentaire ; L reste "COLIS" sans aucun commentaire ; K n'a plus aucun commentaire. Les 3 suites
+de non-régression passent SANS AUCUN changement de total sur les 7 fichiers de référence (les 4
+exemples de la règle n°58 dans MDC_IMPORT_MARCHE ont Unité de référence ≠ Unité de commande
+brutes, donc ce correctif, volontairement étroit, ne les touche pas — la règle n°58 reste donc
+non résolue). Docker reconstruit, HTTP 200 vérifié.
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
@@ -1158,3 +1246,12 @@ sans raison identifiée, c'est un signal de régression à investiguer — voir
 > règle n°17 (VRAC) ne touche aucun des 5 fichiers de référence — elle ne concerne que les
 > fichiers IANOR AGAPE (Viandes fraîches, Volailles), donc pas de ligne dans ce tableau pour
 > elle.
+
+> **Mise à jour (2026-11-13)** : règle n°61 (Conditionnement traité à tort comme diviseur/
+> multiplicateur du prix quand Unité de référence = Unité de commande brutes et prix déjà
+> identiques). Seul "MDC_IMPORT_MARCHE" change parmi les 7 fichiers de référence :
+> `audit_general.py` 193/721 → 191/704 ("lignes avec incohérence"/"cellules marquées") ;
+> `audit_general_commentaires.py` 744 → 727 cellules marquées. Les 6 autres fichiers restent
+> strictement identiques. La règle n°62 (même jour, cas "Colis"/PAQUET sur POMONA EPISAVEUR —
+> LOT 7, hors des 7 fichiers de référence) n'a entraîné AUCUN changement de total sur ces 7
+> fichiers.

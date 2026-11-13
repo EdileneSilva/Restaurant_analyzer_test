@@ -1612,6 +1612,20 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                 # d'écart). En dessous de ce seuil, le prix de référence reste quasi identique
                 # (arrondis, centimes) — ne rien changer évite de déranger pour rien.
                 k_change = diff_relative > motor.TOLERANCE_RATIO
+                # Unité de référence et Unité de commande D'ORIGINE déjà identiques (même mot,
+                # ex: 'KG'='KG'), ET prix déjà égaux : rien d'ambigu à soulever. Sans ce
+                # garde-fou, la quantité lue dans le Conditionnement était traitée comme un
+                # multiplicateur/diviseur obligé du prix, alors qu'ici elle ne fait QUE décrire
+                # la taille typique d'une pièce vendue au poids (ex: "Rôti de porc... 2,2kg" à
+                # 6.19€/kg, vendu ET commandé au kg, pas un contenant à "déplier"). Demandé par
+                # l'utilisatrice le 2026-11-13, vu sur BPF Lot 11 (Webgerest CD45) : "Emincé
+                # épaule de porc - sachet 2kg", D=L='KG', prix_ref=prix_cmd=6.05€, marqué à tort
+                # "deux lectures possibles" (K ET M, en double via verifie_coherence_unite_prix_
+                # identiques qui réagit au nouveau_k posé ici) malgré l'absence de toute
+                # incohérence réelle — supprimer nouveau_k/k_change ici suffit à faire taire les
+                # deux messages, cette 2e règle ne s'activant que si nouveau_k est posé.
+                if abs(prix_ref - prix_cmd) < 0.005 and motor.normalise_texte(unite_cmd) == base_ref_norm:
+                    k_change = False
                 l_novo = motor.CONTENANT_ABREGE.get(mot, mot.upper()) if mot else None
                 # Aucun récipient nommé ('6 x 1L'...), mais chaque unité fait exactement 1
                 # kg/L : comme pour les produits à la pièce, on précise "LOT DE N" plutôt que de
@@ -1710,12 +1724,64 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
             texte = getattr(resultat, attribut)
             if texte:
                 setattr(resultat, attribut, texte.replace(f"'{alias}'", f"'{unite_ref}'"))
+    reconsidere_contenant_seul_deja_coherent(resultat, unite_ref, unite_cmd, conditionnement,
+                                              prix_ref, prix_cmd)
     reconsidere_prix_inexplique(resultat, unite_ref, conditionnement, unite_cmd, prix_ref, prix_cmd,
                                  designation, desig_fourn)
     reconsidere_recipient_de_1_unite(resultat, unite_ref, unite_cmd, conditionnement)
     reconsidere_ratio_un_contre_contenant(resultat, unite_ref, unite_cmd, conditionnement, prix_ref, prix_cmd)
     reconsidere_contenant_nombre_pieces(resultat, unite_ref, conditionnement)
     return resultat
+
+
+def reconsidere_contenant_seul_deja_coherent(resultat, unite_ref, unite_cmd, conditionnement,
+                                              prix_ref, prix_cmd):
+    """Quand motor.traite_ligne (branche PACKAGE_TYPES, first_attempt_v2_prototype.py) a posé
+    'PC' + un prix par pièce suggéré, à partir d'une Unité de référence qui est elle-même un
+    mot de récipient (ex: 'Colis') : si l'Unité de commande D'ORIGINE disait déjà EXACTEMENT le
+    même mot, avec le même prix des deux côtés, il n'y a rien d'incohérent à corriger (même
+    mot, même prix, cohérent par construction — même logique que
+    verifie_coherence_unite_prix_identiques, mais motor.traite_ligne a ici déjà posé sa
+    suggestion de prix avant qu'on puisse l'examiner, donc on l'annule après coup). Remplace
+    cette suggestion par une simple question sur l'Unité de référence, SANS rien changer : le
+    Conditionnement confirme souvent un groupement de plusieurs pièces, donc 'PAQUET' (avec
+    Nombre de pièces rempli) serait peut-être plus précis que de garder le mot de récipient tel
+    quel — à vérifier par une personne, pas tranché ici. Annule aussi, de fait, la correction de
+    l'Unité de commande que reconsidere_contenant_nombre_pieces aurait posée ensuite (son garde-
+    fou vérifie `nouveau_d == 'PC'`, qu'on vient de défaire) : demandé par l'utilisatrice le
+    2026-11-13, vu sur POMONA Lot 7 (Webgerest CD45), ligne 60 — 'Colis'='Colis', 24.89€ des
+    deux côtés, suggérait à tort 24.89€ ÷ 300 = 0.083€/pièce ET changeait l'Unité de commande en
+    'CARTON' (substitution officielle de 'colis', correcte en soi, mais pas pertinente ici
+    puisque rien n'indiquait un vrai problème sur cette ligne)."""
+    if resultat.nouveau_d != "PC" or resultat.nouveau_k is None:
+        return
+    if not unite_cmd or motor.normalise_texte(unite_cmd) != motor.normalise_texte(unite_ref):
+        return
+    if prix_ref is None or prix_cmd is None or abs(prix_ref - prix_cmd) > 0.005:
+        return
+    resultat.nouveau_d = None
+    resultat.nouveau_k = None
+    resultat.couleur_k = None
+    resultat.commentaire_k = None
+    # 'unite_ref' (pas None) : empêche les règles suivantes de la chaîne (ex:
+    # reconsidere_mot_litteral_non_reconnu, qui ne vérifie QUE 'nouveau_l is not None') de
+    # proposer quand même un remplacement officiel sur l'Unité de commande — texte identique à
+    # l'original, donc rien à voir ni à écrire de nouveau, juste un verrou.
+    resultat.nouveau_l = unite_ref
+    resultat.couleur_l = None
+    resultat.commentaire_l = None
+    resultat.couleur_d = motor.COULEUR_A_VERIFIER
+    n = motor.extraire_nombre_pieces(conditionnement)
+    suggestion = (f"'PAQUET' (avec Nombre de pièces renseigné à {n}) serait peut-être plus "
+                  f"précis que de garder '{unite_ref}' tel quel" if n else
+                  f"'PC'/'KG'/'L' serait peut-être plus précis que de garder '{unite_ref}' tel "
+                  "quel")
+    resultat.commentaire_d = (
+        f"Unité de référence et Unité de commande identiques ('{unite_ref}'), avec le même "
+        f"prix des deux côtés ({formate_prix(prix_ref)}€) — cohérent, rien à corriger côté "
+        f"prix. Mais le Conditionnement ('{conditionnement}') pourrait justifier une unité "
+        f"plus précise : {suggestion} — êtes-vous sûr(e) que '{unite_ref}' est la bonne unité "
+        "de référence ? Rien n'est changé automatiquement.")
 
 
 def reconsidere_contenant_nombre_pieces(resultat, unite_ref, conditionnement):

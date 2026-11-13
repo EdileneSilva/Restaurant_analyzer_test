@@ -30,7 +30,9 @@ TOTAUX_CELLULES = {
     "2026 09 22 Base article groupement 4.xlsx": 955,
     "2026 09 22 Base article groupement 5.xlsx": 864,
     "2026 09 22 Base article groupement commun.xlsx": 956,
-    "MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx": 744,
+    # 744 -> 727 le 2026-11-13, même raison que test_non_regression_audit_general.py (TOTAUX) —
+    # voir catalogue_erreurs.md, règle n°61.
+    "MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx": 727,
 }
 
 
