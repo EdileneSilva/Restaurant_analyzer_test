@@ -1137,6 +1137,143 @@ exemples de la règle n°58 dans MDC_IMPORT_MARCHE ont Unité de référence ≠
 brutes, donc ce correctif, volontairement étroit, ne les touche pas — la règle n°58 reste donc
 non résolue). Docker reconstruit, HTTP 200 vérifié.
 
+### 63. "Bib" (Bag-in-Box) non reconnu comme contenant, signalé à tort comme ne correspondant pas à l'emballage
+
+Signalé par l'utilisatrice le 2026-11-13 sur `LOGIFRAIS - LOT 13`, ligne 3 : Conditionnement
+"Bib 10kg", Unité de commande "Bib" (littéral) — l'audit disait "l'unité de commande ne semble
+pas correspondre à l'emballage", alors que "Bib" est bel et bien écrit dans le Conditionnement.
+Cause : "bib" était simplement absent de toutes les listes de mots de contenant reconnus
+(`MOTS_CONTENANT`, `_MOTS_CONTENANT_CANONIQUES`, `mots_types` dans
+`verifie_unite_commande_etendue`, les deux moteurs). Corrigé en l'ajoutant à ces listes, SANS
+l'ajouter à `CONTENANT_ABREGE` — "Bib" reste donc écrit tel quel, jamais substitué
+automatiquement (cohérent avec la règle mémoire "Webgerest CD45 sans substitution" : la
+décision d'un éventuel équivalent officiel est différée, pas prise ici). Validé : plus aucun
+commentaire sur cette ligne. Les 3 suites de non-régression passent sans changement de total.
+
+### 64. "Catégorie légume/fruit → SAC par défaut" appliquée à tort à un liquide embouteillé
+
+Signalé le même jour sur `LOGIFRAIS - LOT 13`, ligne 8 : "Jus de pommes bio 1L", Lot "JUS DE
+FRUIT", Conditionnement "x6bt" (déjà résolu en "CARTON" par le prétraitement) — `applique_defaut_
+legume` (règle du 2026-11-10 : quand rien n'explique le prix pour un produit "légume/fruit",
+deviner "SAC" par défaut) s'est déclenchée uniquement parce que le nom du Lot contient le mot
+"fruit", sans rapport avec le fait que ce soit une vraie denrée en vrac — un jus de fruit en
+bouteille n'a aucune raison d'être dans un "SAC". Corrigé en ajoutant un paramètre `unite_ref` à
+cette fonction (les deux moteurs) et en l'excluant totalement quand l'unité de référence est
+'L'/'litre' (les liquides ne sont jamais vendus "au sac"). Validé sur la ligne réelle : plus de
+proposition "SAC". Les 3 suites de non-régression passent sans changement de total (aucune ligne
+des 7 fichiers de référence n'est une catégorie légume/fruit en L).
+
+### 65. Messages D/K/L/M génériques qui jettent l'explication déjà écrite par la règle d'origine
+
+Trouvé en creusant les lignes 5-6/12-18 de `LOGIFRAIS - LOT 13` (`audit_general_commentaires.py`
+seulement — `audit_general.py` ne fait pas cette erreur, il réutilise déjà `resultat.commentaire_
+*` partout) : quatre blocs de la boucle d'audit principale (D, le "if k_differe" de K, L, M)
+reconstruisaient leur propre texte générique ("D'après la comparaison des prix...", "ne semble
+pas correspondre à l'emballage...") au lieu de reprendre `resultat.commentaire_d/k/l/m`, déjà
+préparé par la règle qui a posé le signalement et contenant l'explication précise (le calcul
+exact, le Conditionnement en cause, une question de vérification ciblée...). Ce même bug avait
+déjà été identifié et corrigé une fois pour K (2026-11-10, voir le commentaire resté dans le
+code à l'endroit du `elif`), mais seulement sur UNE des deux branches qui gèrent K, jamais sur
+D/L/M. Conséquence concrète : la question de vérification posée par la nouvelle règle n°68
+ci-dessous (ligne 5-6, "Pot ind x24pc") disparaissait complètement, remplacée par "L'unité de
+commande ('POT') ne semble pas correspondre à l'emballage — à vérifier à la main", qui ne dit
+rien du ratio pourtant confirmé.
+
+Corrigé en supprimant la reconstruction de texte dans les 4 blocs et en réutilisant directement
+`resultat.couleur_d/k/l/m` + `resultat.commentaire_d/k/l/m` — sûr car `traite_ligne_etendue()`
+garantit déjà, via sa boucle de garde-fou finale, qu'un commentaire minimal existe dès qu'une
+couleur est posée (donc jamais de commentaire vide affiché). Validé : les lignes 12-18
+expliquent maintenant explicitement le calcul par le Conditionnement (voir règle n°66 ci-dessous
+pour le contenu exact), la ligne 5-6 affiche la vraie question de vérification. Les 3 suites de
+non-régression passent SANS AUCUN changement de total sur les 7 fichiers de référence (le
+contenu du texte change, jamais la couleur posée sur la cellule ni le fait qu'un commentaire
+existe).
+
+### 66. Comptage × poids d'un conditionnement jamais multiplié quand l'ordre ou le format est inhabituel
+
+Quatre formats de Conditionnement, tous réels (`LOGIFRAIS - LOT 13`, lignes 30/40/45/46/52),
+n'étaient reconnus par AUCUNE fonction d'extraction de quantité, laissant le prix signalé à tort
+comme "inexpliqué" alors que le calcul colle exactement :
+- "Carton x6Bt"/"Colis x6Bt" (compte collé au "x", sans poids dans le Conditionnement lui-même
+  — voir aussi la règle n°67 pour le poids pris dans la Désignation).
+- "Barquette 25x130gr env" : la quantité (25×130g = 3,25kg) n'était jamais multipliée — seul le
+  poids d'UNE pièce (130g) était trouvé par la recherche en texte libre, et le "env" final
+  cassait de toute façon les motifs stricts ancrés en fin de chaîne (`RE_CONTENANT_PUIS_MULT`
+  attend `$` juste après l'unité).
+- "Barquette 10x140/150gr env" : même problème, plus une fourchette de poids ("140/150") que
+  rien ne savait découper.
+- "POT de 500 g x 5" (compte APRÈS le poids, pas avant) : aucun motif ne gère cet ordre pour un
+  calcul de quantité TOTALE (seul `RE_CONTENANT_POIDS_PUIS_X`, utilisé ailleurs pour le poids
+  PAR PIÈCE quand l'unité de référence est déjà "PC", existait dans cet ordre).
+
+Corrigé en ajoutant deux nouvelles regex de recherche libre (pas ancrées en `$`, donc un "env"
+final ne casse plus rien) à `_cherche_candidats_quantite_libre` (les deux moteurs) :
+`RE_MULTIPLICATEUR_CONTENANT_X_LIBRE` ("CONTENANT Nx POIDS[/POIDS2]UNITÉ") et son symétrique
+`..._INVERSE` ("CONTENANT (de)? POIDS[/POIDS2]UNITÉ x N"). Une fourchette ("140/150") ajoute LES
+DEUX bornes comme candidats séparés (10×140g=1,4kg ET 10×150g=1,5kg), plutôt que de deviner une
+moyenne — le reste du code (déjà écrit pour essayer plusieurs candidats) teste chacune contre le
+ratio observé et retient celle qui colle, sans qu'aucune tolérance n'ait besoin d'être élargie
+(la borne haute de "140/150gr" colle à 0,02% du ratio réel de la ligne 46).
+
+Validé sur les 4 lignes réelles : plus aucun signalement de prix inexpliqué, dans les deux
+moteurs. Les 3 suites de non-régression passent sans changement de total sur les 7 fichiers de
+référence (aucun d'eux n'a de Conditionnement dans ces formats précis).
+
+### 67. Comptage du Conditionnement jamais confronté au poids/volume unitaire donné par la Désignation
+
+Deux cas réels distincts, mais la même cause : le Conditionnement donne un NOMBRE d'unités sans
+aucun poids/volume, et c'est la Désignation (article ou fournisseur) qui précise le poids/volume
+d'UNE unité — jamais rapprochés l'un de l'autre avant ce correctif.
+- `LOGIFRAIS - LOT 13`, ligne 7 : "Carton 6 bouteilles" (6 pièces, aucun poids) + désignation
+  "Jus de poires HVE 1L" (1L par bouteille) → 6 × 1L = 6, exactement le ratio Prix commande ÷
+  Prix référence observé (18€ ÷ 3€). Avant ce correctif, `reconsidere_prix_inexplique`
+  concluait directement "L'unité de référence devrait peut-être être 'PC' plutôt que 'L'" sans
+  avoir cherché le poids par pièce dans la Désignation — une fausse piste, alors que 'L' était
+  déjà la bonne lecture.
+- Lignes 8/30/40 : Conditionnement en compte nu ("x6bt", "Carton x6Bt", "Colis x6Bt" — voir la
+  nouvelle regex `RE_MULTIPLICATEUR_BARE`, un mot de contenant optionnel + "x" + N + un code
+  abrégé quelconque jamais utilisé) combiné à "... 1L"/"... 750mL" dans la Désignation : 6×1L=6
+  ou 6×0,75L=4,5, collant exactement aux ratios observés (lignes 8, 40 et 30 respectivement).
+
+Corrigé à deux endroits (les deux moteurs) : (1) dans la branche `RE_CONTENANT_PIECES_SEULEMENT`
+de `reconsidere_prix_inexplique`, le nombre de pièces du Conditionnement est maintenant multiplié
+par le poids/volume unitaire trouvé dans la Désignation AVANT de conclure que l'unité de
+référence devrait changer — si ça colle, rien n'est signalé du tout ; (2) un nouveau bloc,
+juste après le calcul du ratio, essaie `RE_MULTIPLICATEUR_BARE` (Conditionnement) × le
+poids/volume unitaire (Désignation) en premier recours, avant toute autre recherche.
+
+Validé sur les 4 lignes réelles : ligne 7 ne signale plus rien (D reste 'L') ; lignes 8/30/40 ne
+signalent plus rien non plus. Les 3 suites de non-régression passent sans changement de total.
+
+### 68. "PC"/"unité" avec un comptage abrégé non reconnu ('xNpc') : conversion KG proposée sans aucune base
+
+Signalé le 2026-11-13 sur `LOGIFRAIS - LOT 13`, lignes 5-6 : Unité de référence "PC" (alias
+interne "unité"), Conditionnement "Pot ind x24pc", poids par pièce déjà renseigné (0,11 kg,
+extrait de la Désignation par le prétraitement). Le ratio Prix commande ÷ Prix référence
+(21,97€ ÷ 0,92€ = 23,88) est à moins de 0,5% de 24 — exactement le compte du Conditionnement —
+mais AUCUNE règle nulle part ne reconnaissait ce format abrégé ("x24pc", sans espace, "pc" pas
+"pièces") comme un comptage de pièces : la branche `'unite'/'piece'` du moteur partagé
+(`ALIAS_UNITE_REF`) ne connaît que la conversion en KG via le poids déjà rempli en E, et
+proposait donc de changer l'unité de référence en 'KG' et de recalculer un prix de référence —
+sans aucune base textuelle pour ce choix, l'utilisatrice l'a confirmé ("não tem nada que te
+permita dizer isso").
+
+Corrigé en ajoutant, juste avant l'appel à `ALIAS_UNITE_REF`/`motor.traite_ligne`, une
+vérification avec la nouvelle regex `RE_MULTIPLICATEUR_BARE` (voir règle n°67) : si elle trouve
+un compte N et que le ratio colle à N (tolérance standard), on NE propose ni KG ni aucun
+renommage automatique — l'unité de référence reste 'PC', et on pose une question de
+vérification sur l'unité de commande ("'POT' désigne-t-il bien ce groupe de 24, ou une seule
+unité ?"), sans deviner de réponse (même esprit que la règle n°62 : le prix est cohérent, c'est
+le NOM du contenant qui reste à vérifier par une personne).
+
+Validé sur les 2 lignes réelles (5 et 6, mêmes Conditionnement/ratio) : D reste 'PC', K n'a plus
+de suggestion de prix, L porte la question de vérification — visible seulement grâce à la
+règle n°65 ci-dessus (sans elle, le message restait caché derrière le texte générique). Les 3
+suites de non-régression passent sans changement de total (aucune ligne des 7 fichiers de
+référence n'a ce format de Conditionnement). Les 13 fichiers réels Webgerest CD45 ont été
+repassés en entier dans le pipeline complet (prétraitement + audit) après ces 6 règles
+(n°63-68) : aucune erreur, totaux de cellules marquées cohérents (`webgerest_cd45_commentado/`).
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du

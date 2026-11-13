@@ -71,7 +71,12 @@ MOTS_CONTENANT = ["sac", "seau", "brique", "barquette", "barq", "bq", "bidon", "
                   "bouteile",  # faute de frappe fréquente ('BOUTEILES', 1 seul L)
                   "caisse", "plaque", "plateau", "clayette", "pack", "gourde", "botte",
                   "bac", "coffret", "plaquette", "paquet", "etui", "étui", "bombe",
-                  "bocal", "flacon", "tube"]
+                  "bocal", "flacon", "tube",
+                  # "Bib" (Bag-in-Box, ex: "Bib 10kg", "Bib de 5L") : récipient réellement
+                  # nommé dans le Conditionnement de la famille Webgerest CD45, mais sans
+                  # équivalent officiel connu — reconnu tel quel (jamais substitué), en
+                  # attendant une décision métier. Demandé le 2026-11-13.
+                  "bib"]
 _MOTS_REGEX = "pi[eè]ce|" + "|".join(MOTS_CONTENANT)
 
 # "GR" (abréviation très fréquente de gramme) est absent du vocabulaire d'origine, qui ne
@@ -647,7 +652,7 @@ _MOTS_CONTENANT_CANONIQUES = [
     "sac", "seau", "brique", "barquette", "bq", "bidon", "outre", "colis", "pot", "sachet",
     "carton", "poche", "cageot", "boite", "boîte", "filet", "bouteille", "caisse", "plaque",
     "plateau", "clayette", "bac", "coffret", "plaquette", "paquet", "etui", "étui", "bombe",
-    "bocal", "flacon", "tube",
+    "bocal", "flacon", "tube", "bib",
     "piece",
 ]
 _MOTS_CONTENANT_CONNUS = set(MOTS_CONTENANT) | {"piece", "pièce"}
@@ -1695,6 +1700,22 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                         f"{formate_prix(prix_ref * quantite)}€ (si {formate_prix(prix_ref)}€ "
                         f"est déjà le bon prix au {base}) — à vérifier, rien n'est modifié "
                         "automatiquement.")
+                    # 3e piste : le ratio réel colle à un AUTRE entier que celui lu dans le
+                    # Conditionnement — signe possible que c'est le Conditionnement lui-même
+                    # qui est faux/périmé (pas les prix). Demandé par l'utilisatrice le
+                    # 2026-11-13 (LOGIFRAIS Lot 13, lignes 12-18) pour expliquer explicitement
+                    # d'où vient l'ambiguïté plutôt que de juste proposer deux prix sans dire
+                    # pourquoi.
+                    entier_proche = round(ratio_prix)
+                    if (entier_proche >= 1
+                            and abs(ratio_prix - entier_proche) <= motor.TOLERANCE_RATIO * entier_proche
+                            and abs(entier_proche - quantite) > 0.01):
+                        r.commentaire_k += (
+                            f" Autre piste : le ratio réel observé ({round(ratio_prix, 3)}) est très "
+                            f"proche de l'entier {entier_proche}, différent de la quantité lue "
+                            f"dans le Conditionnement ({qte_affichee}) — c'est peut-être le "
+                            f"Conditionnement qui devrait indiquer {entier_proche}, pas un des "
+                            "deux prix qui est faux.")
                     if mot in ("piece", "pièce"):
                         # 'piece' générique (pas un vrai récipient nommé) : l'incohérence peut
                         # aussi bien venir d'une Unité de référence mal choisie (l'article est
@@ -1715,6 +1736,36 @@ def _traite_ligne_etendue_nucleo(unite_ref, poids_ref, designation, conditionnem
                             f"('{conditionnement}').")
 
                 return r  # coherent ou signalé ci-dessus — D/K/L déjà tranchés ici
+
+    # Compte nu abrégé ('Pot ind x24pc', 'x24pc'... — voir RE_MULTIPLICATEUR_BARE) quand
+    # l'unité de référence est déjà à la pièce/l'unité ET qu'un poids par pièce est déjà connu
+    # (poids_ref, rempli par le prétraitement depuis la Désignation) : avant de laisser le
+    # reste du moteur partagé convertir D en KG (branche 'unite'/'piece' de
+    # motor.traite_ligne, qui ne reconnaît pas ce format et suppose à tort un prix au poids —
+    # aucune règle nulle part ne compare au nombre de pièces dans ce cas), on vérifie d'abord
+    # si le ratio confirme plutôt N pièces. Si oui : D reste 'PC', rien n'est renommé
+    # automatiquement, on pose juste une question de vérification sur l'unité de commande (le
+    # contenant pourrait désigner UNE pièce ou le groupe de N — on ne sait pas lequel, donc on
+    # ne devine rien). Demandé le 2026-11-13 (LOGIFRAIS Lot 13, lignes 5-6 : 'Pot ind x24pc',
+    # ratio 23.88 ≈ 24, Unité de commande 'POT').
+    if (motor.normalise_texte(unite_ref) in ("pc", "piece", "pièce", "unite", "unité")
+            and poids_ref and prix_ref and prix_cmd):
+        m_bare_pc = RE_MULTIPLICATEUR_BARE.match(conditionnement or "")
+        if m_bare_pc:
+            n_bare_pc = int(m_bare_pc.group(2))
+            ratio_pc = prix_cmd / prix_ref
+            if n_bare_pc > 1 and abs(ratio_pc - n_bare_pc) <= motor.TOLERANCE_RATIO * n_bare_pc:
+                r = motor.Resultat()
+                r.couleur_l = motor.COULEUR_A_VERIFIER
+                r.commentaire_l = (
+                    f"Unité de référence ('{unite_ref}') et Conditionnement "
+                    f"('{conditionnement}') cohérents avec le prix : le ratio Prix commande ÷ "
+                    f"Prix référence ({round(ratio_pc, 3)}) correspond exactement aux "
+                    f"{n_bare_pc} unités du conditionnement — rien à corriger côté prix. Mais "
+                    f"l'unité de commande ('{unite_cmd}') désigne-t-elle bien ce groupe de "
+                    f"{n_bare_pc}, ou une seule unité ? À vérifier, rien n'est changé "
+                    "automatiquement.")
+                return r
 
     alias = ALIAS_UNITE_REF.get(motor.normalise_texte(unite_ref))
     resultat = motor.traite_ligne(alias or unite_ref, poids_ref, designation, conditionnement,
@@ -1937,6 +1988,16 @@ def reconsidere_recipient_de_1_unite(resultat, unite_ref, unite_cmd, conditionne
 RE_CONTENANT_PIECES_SEULEMENT = re.compile(
     rf"^\s*({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(?:de\s+)?(\d+)\s*{_MOT_COMPTAGE_FINAL}\s*$", re.I)
 
+# Compte NU, sans aucun poids/volume dans le Conditionnement lui-même : un mot de récipient
+# optionnel (ex: 'Carton x6Bt', 'Colis x6Bt'), ou rien du tout (ex: 'x6bt', déjà résolu en
+# 'CARTON' par le prétraitement des fichiers Webgerest CD45 — voir
+# pretraitement_a_formater.py), suivi de 'x<N>' puis un code abrégé quelconque (bt, pc...),
+# jamais utilisé ici (seul N compte). Le poids/volume PAR UNITÉ, lui, ne vient alors que de la
+# Désignation (ex: '... 1L', '... 750mL') — voir son usage dans reconsidere_prix_inexplique.
+# Demandé le 2026-11-13 (LOGIFRAIS Lot 13, lignes 8/30/40).
+RE_MULTIPLICATEUR_BARE = re.compile(
+    rf"^\s*(?:({_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF})?x\s*(\d+)\s*[a-zà-ÿ]*\.?\s*$", re.I)
+
 # "LOT DE N PIECES" (ex: yaourts vendus en lot de 2/4/6/8) : même logique que ci-dessus, mais
 # "lot" n'est volontairement PAS un récipient physique (pas dans _MOTS_REGEX) — c'est un
 # simple marqueur de comptage, jamais un nom à reprendre tel quel dans l'unité de commande
@@ -1955,6 +2016,24 @@ RE_LOT_DE_N_UNITE_CMD = re.compile(r"^lot\s+de\s+(\d+)$", re.I)
 # reconsidere_prix_inexplique(), sur du texte qui ne respecte aucun format propre.
 RE_MULTIPLICATEUR_CONTENANT_LIBRE = re.compile(
     rf"(\d+)\s*(?:{_MOTS_REGEX})s?\s+de\s+([\d,.]+)\s*({_UNITES_REGEX})", re.I)
+
+# Même idée, mais pour le format "CONTENANT NxPOIDS[/POIDS2]UNITÉ" (compte collé au 'x', ex:
+# 'Barquette 25x130gr', 'Barquette 10x140/150gr') — ordre inverse de
+# RE_MULTIPLICATEUR_CONTENANT_LIBRE (ici le compte vient AVANT le poids, pas après "de"). Pas
+# ancré en fin de chaîne (comme RE_CONTENANT_PUIS_MULT) : un 'env'/'environ' qui suit ne casse
+# donc rien, cette recherche en texte libre l'ignore simplement. Le 2e poids (optionnel) gère
+# une fourchette ('140/150gr' : une pièce pèse entre 140 et 150g) — les DEUX bornes deviennent
+# des candidats séparés, le reste du code essaie chacune contre le ratio observé plutôt que de
+# deviner une moyenne. Demandé le 2026-11-13 (LOGIFRAIS Lot 13, lignes 45/46/52).
+RE_MULTIPLICATEUR_CONTENANT_X_LIBRE = re.compile(
+    rf"(?:{_MOTS_REGEX})s?\s+{_MOT_QUALIFICATIF}(\d+)\s*x\s*([\d,.]+)(?:\s*[/-]\s*([\d,.]+))?"
+    rf"\s*({_UNITES_REGEX})\b", re.I)
+
+# Même chose, ordre "CONTENANT (de)? POIDS[/POIDS2]UNITÉ x N" (poids avant le compte, ex: 'POT
+# de 500 g x 5') — symétrique de RE_CONTENANT_POIDS_PUIS_X, mais en texte libre (pas ancré).
+RE_MULTIPLICATEUR_CONTENANT_X_LIBRE_INVERSE = re.compile(
+    rf"(?:{_MOTS_REGEX})s?\s+(?:de\s+)?([\d,.]+)(?:\s*[/-]\s*([\d,.]+))?\s*({_UNITES_REGEX})"
+    rf"\s*x\s*(\d+)\b", re.I)
 
 # Fourchette de poids/volume (ex: 'PIECE DE 1,5 A 2,5 KG', '1-3KG') — poids variable d'une
 # pièce à l'autre, précisé par une plage plutôt qu'un nombre unique.
@@ -1995,6 +2074,26 @@ def _cherche_candidats_quantite_libre(texte, base_cible):
                               * int(n_str))
         except (KeyError, ValueError):
             continue
+    for n_str, qty_str, qty2_str, unite_str in RE_MULTIPLICATEUR_CONTENANT_X_LIBRE.findall(texte):
+        if motor.base_depuis_unite(unite_str) != ("kg" if base_cible == "kg" else "l"):
+            continue
+        try:
+            facteur = motor.FACTEUR_VERS_KG_OU_L[unite_str.lower()] * int(n_str)
+            candidats.append(motor._nombre(qty_str) * facteur)
+            if qty2_str:
+                candidats.append(motor._nombre(qty2_str) * facteur)
+        except (KeyError, ValueError):
+            continue
+    for qty_str, qty2_str, unite_str, n_str in RE_MULTIPLICATEUR_CONTENANT_X_LIBRE_INVERSE.findall(texte):
+        if motor.base_depuis_unite(unite_str) != ("kg" if base_cible == "kg" else "l"):
+            continue
+        try:
+            facteur = motor.FACTEUR_VERS_KG_OU_L[unite_str.lower()] * int(n_str)
+            candidats.append(motor._nombre(qty_str) * facteur)
+            if qty2_str:
+                candidats.append(motor._nombre(qty2_str) * facteur)
+        except (KeyError, ValueError):
+            continue
     if not candidats:
         for qty_str, unite_str in motor.RE_LIBRE.findall(texte):
             if motor.base_depuis_unite(unite_str) != ("kg" if base_cible == "kg" else "l"):
@@ -2031,24 +2130,65 @@ def reconsidere_prix_inexplique(resultat, unite_ref, conditionnement, unite_cmd,
         resultat.couleur_m = None
         resultat.commentaire_m = None
         nb_pieces = int(m.group(2))
-        if prix_cmd and abs(prix_cmd / prix_ref - nb_pieces) <= motor.TOLERANCE_RATIO * nb_pieces:
-            # Aucun poids n'est donné nulle part (impossible de vérifier un recalcul en kg/L),
-            # mais le ratio Prix commande ÷ Prix référence colle exactement au nombre de pièces
-            # annoncé par le conditionnement — signe que le prix de référence pourrait en
-            # réalité être un prix à la pièce, étiqueté à tort en kg/L. Simple suggestion à
-            # vérifier par une personne, jamais changé seul (le poids réel d'une pièce reste
-            # inconnu, donc pas de recalcul automatique).
-            resultat.couleur_d = motor.COULEUR_RATIO_SUSPECT
-            resultat.commentaire_d = (
-                f"Unité de référence actuelle : '{unite_ref}'. Le conditionnement "
-                f"('{conditionnement}') ne donne que {nb_pieces} pièces, sans aucun poids — et "
-                f"le ratio Prix commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = "
-                f"{round(prix_cmd / prix_ref, 3)}) correspond exactement à ce nombre de pièces. "
-                f"Cela suggère que l'unité de référence devrait peut-être être 'PC' plutôt que "
-                f"'{unite_ref}' — à vérifier, non modifié automatiquement.")
+        if prix_cmd:
+            ratio_piece = prix_cmd / prix_ref
+            base_cmp = "kg" if base_cible == "kg" else "l"
+            # Avant de suggérer de changer l'unité de référence : la Désignation (article ou
+            # fournisseur) donne-t-elle un poids/volume PAR PIÈCE qui, multiplié par le nombre
+            # de pièces du conditionnement, explique déjà le ratio observé ? Si oui, l'unité de
+            # référence ('KG'/'L') est la bonne lecture — le conditionnement ne nommait juste
+            # pas le poids lui-même. Rien à signaler. Demandé le 2026-11-13 (LOGIFRAIS Lot 13,
+            # ligne 7 : 'Carton 6 bouteilles' + désignation '... 1L', 6 × 1L = 6 = ratio exact,
+            # alors que le conditionnement seul ne révèle qu'un compte de 6 bouteilles).
+            for texte_desig in (designation, desig_fourn):
+                if not texte_desig:
+                    continue
+                poids_unite, base_poids = extraire_quantite_designation_etendue(texte_desig)
+                if not poids_unite or base_poids != base_cmp:
+                    continue
+                attendu = nb_pieces * poids_unite
+                if attendu > 0 and abs(ratio_piece - attendu) <= motor.TOLERANCE_RATIO * attendu:
+                    return
+            if abs(ratio_piece - nb_pieces) <= motor.TOLERANCE_RATIO * nb_pieces:
+                # Aucun poids n'est donné nulle part (impossible de vérifier un recalcul en
+                # kg/L), mais le ratio Prix commande ÷ Prix référence colle exactement au
+                # nombre de pièces annoncé par le conditionnement — signe que le prix de
+                # référence pourrait en réalité être un prix à la pièce, étiqueté à tort en
+                # kg/L. Simple suggestion à vérifier par une personne, jamais changé seul (le
+                # poids réel d'une pièce reste inconnu, donc pas de recalcul automatique).
+                resultat.couleur_d = motor.COULEUR_RATIO_SUSPECT
+                resultat.commentaire_d = (
+                    f"Unité de référence actuelle : '{unite_ref}'. Le conditionnement "
+                    f"('{conditionnement}') ne donne que {nb_pieces} pièces, sans aucun poids — "
+                    f"et le ratio Prix commande ÷ Prix référence ({prix_cmd} ÷ {prix_ref} = "
+                    f"{round(ratio_piece, 3)}) correspond exactement à ce nombre de pièces. "
+                    f"Cela suggère que l'unité de référence devrait peut-être être 'PC' plutôt "
+                    f"que '{unite_ref}' — à vérifier, non modifié automatiquement.")
         return
 
     ratio_observe = prix_cmd / prix_ref
+
+    # Compte nu (ex: 'x6bt', 'Carton x6Bt' — voir RE_MULTIPLICATEUR_BARE) : le Conditionnement
+    # ne donne qu'un nombre d'unités, sans poids/volume — mais si la Désignation (article ou
+    # fournisseur) donne un poids/volume PAR UNITÉ dans la même base, et que ce nombre multiplié
+    # par ce poids explique déjà le ratio observé, l'unité de référence/le conditionnement sont
+    # cohérents : rien à signaler. Demandé le 2026-11-13 (LOGIFRAIS Lot 13, lignes 8/30/40 —
+    # ex: 'Colis x6Bt' + désignation '... 1L', 6 × 1L = 6 = ratio exact).
+    m_bare = RE_MULTIPLICATEUR_BARE.match(conditionnement or "")
+    if m_bare:
+        n_bare = int(m_bare.group(2))
+        base_cmp = "kg" if base_cible == "kg" else "l"
+        for texte_desig in (designation, desig_fourn):
+            if not texte_desig:
+                continue
+            poids_unite, base_poids = extraire_quantite_designation_etendue(texte_desig)
+            if not poids_unite or base_poids != base_cmp:
+                continue
+            attendu = n_bare * poids_unite
+            if attendu > 0 and abs(ratio_observe - attendu) <= motor.TOLERANCE_RATIO * attendu:
+                resultat.couleur_m = None
+                resultat.commentaire_m = None
+                return
 
     # Calibre/poids APPROXIMATIF ou variable d'une pièce à l'autre (ex: '110g environ',
     # '120-130g environ', '100g et plus', 'calibres 90 et 110g') : ce nombre décrit la taille
@@ -2280,7 +2420,7 @@ def verifie_unite_commande_etendue(unite_cmd, conditionnement, designation):
                   "outre", "colis", "pot", "sachet", "carton", "poche", "bouteille", "bouteile",
                   "cageot", "boite", "boîte", "filet", "caisse", "plaque", "plateau", "clayette",
                   "bac", "coffret", "plaquette", "paquet", "etui", "étui", "bombe",
-                  "bocal", "flacon", "tube"]
+                  "bocal", "flacon", "tube", "bib"]
     trouve = [m for m in mots_types if m in texte_combine]
     if not trouve:
         return True, None
@@ -2643,7 +2783,7 @@ RE_CATEGORIE_LEGUME = re.compile(r"l[ée]gume|verdure|fruit", re.I)
 
 
 def applique_defaut_legume(resultat, lot_valor, designation, conditionnement, unite_cmd,
-                            prix_ref=None, prix_cmd=None):
+                            prix_ref=None, prix_cmd=None, unite_ref=None):
     """Pour un produit de catégorie légume/verdure/fruit : si rien (ni le conditionnement, ni
     E) n'a permis d'expliquer le ratio des prix (couleur_m = prix inexpliqué), OU si l'unité
     de commande reste un simple 'KG'/'L' alors que le ratio Prix commande ÷ Prix référence est
@@ -2652,7 +2792,16 @@ def applique_defaut_legume(resultat, lot_valor, designation, conditionnement, un
     d'un lot/sac de 12 kg, pas d'un seul kilo) — et qu'aucun mot de récipient n'est
     identifiable dans le conditionnement, on regarde la désignation ; si elle non plus ne
     donne rien, on suppose 'SAC' par défaut (l'emballage le plus courant pour ces produits) —
-    à confirmer, mais ça évite de laisser la case avec une unité qui ne veut rien dire."""
+    à confirmer, mais ça évite de laisser la case avec une unité qui ne veut rien dire.
+
+    Exclu quand l'unité de référence est 'L'/'litre' : le nom du Lot peut contenir 'fruit'
+    sans que le produit soit une vraie denrée en vrac (ex: 'JUS DE FRUIT', un liquide
+    embouteillé) — 'SAC' n'a alors aucun sens comme contenant par défaut. Trouvé le
+    2026-11-13 sur LOGIFRAIS Lot 13, ligne 8 ('Jus de pommes bio 1L', Lot 'JUS DE FRUIT',
+    Conditionnement 'x6bt' déjà résolu en 'CARTON' par le prétraitement — la règle proposait
+    quand même 'SAC' par défaut, sans rapport avec le produit réel)."""
+    if unite_ref and motor.normalise_texte(unite_ref) in ("l", "litre"):
+        return
     prix_inexplique = resultat.couleur_m == motor.COULEUR_PRIX_INEXPLIQUE
     label_kg_l_malgre_ratio = (
         resultat.nouveau_l is None
@@ -2891,7 +3040,7 @@ def audite_fournisseur(ws, ws_valeurs, ligne, designation, unite_ref, poids_ref,
                                          unite_cmd, prix_ref, prix_cmd, desig_fourn)
 
         applique_defaut_legume(resultat, lot_valor, designation, conditionnement, unite_cmd,
-                                prix_ref, prix_cmd)
+                                prix_ref, prix_cmd, unite_ref)
 
         flag_cond = getattr(resultat, "flag_conditionnement", None)
         if flag_cond:
