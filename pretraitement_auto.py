@@ -222,8 +222,14 @@ def _feuille_grada(ws):
 
 
 def detecte_format(chemin_source, nom_fichier=None):
-    """Renvoie 'canonique', 'canonique_incomplet', 'regal', 'grada', 'a_formater' ou None
-    (format non reconnu).
+    """Renvoie 'canonique', 'canonique_incomplet', 'regal', 'grada', 'a_formater',
+    'bpu_webgerest_cd45' ou None (format non reconnu).
+
+    'bpu_webgerest_cd45' : famille "TR__BPU_pour_intégration_Webgerest_CD45" (13 fichiers reçus
+    le 2026-11-12, un par fournisseur/lot) — détectée par CONTENU (feuille "BPU - LOT N" +
+    en-tête), PAS par nom de fichier comme les 5 familles de a_formater/ ci-dessous : ici, le
+    nom change à chaque envoi (un fichier par fournisseur), pas de registre possible. Voir
+    pretraitement_a_formater.feuille_bpu_webgerest_cd45/transforme_bpu_dqe_webgerest_cd45.
 
     'canonique_incomplet' : les deux en-têtes ancres sont bien là (Désignation de l'article +
     Unité de référence), mais une colonne du bloc commun attendue par format_cible.md manque
@@ -251,6 +257,9 @@ def detecte_format(chemin_source, nom_fichier=None):
     for ws in wb.worksheets:
         if _feuille_grada(ws):
             return "grada"
+    for ws in wb.worksheets:
+        if paf.feuille_bpu_webgerest_cd45(ws):
+            return "bpu_webgerest_cd45"
     if nom_fichier and paf.trouve_entree_connue(nom_fichier):
         return "a_formater"
     return None
@@ -270,6 +279,7 @@ _STATUT_EXTERNE = {
     "regal": "formatable",
     "grada": "formatable",
     "a_formater": "formatable",
+    "bpu_webgerest_cd45": "formatable",
     None: "non_formatable",
 }
 
@@ -474,6 +484,14 @@ def transforme_automatiquement(chemin_source, chemin_sortie, nom_fichier=None):
         cle_registre = paf.trouve_entree_connue(nom_fichier_registre)
         try:
             return "a_formater", paf.transforme_fichier_connu(chemin_source, chemin_sortie, cle_registre), []
+        except CauseFormatInvalide as exc:
+            return None, None, [exc.cause()]
+    if format_detecte == "bpu_webgerest_cd45":
+        _reseek(chemin_source)
+        try:
+            nb_lignes, _avertissements = paf.transforme_bpu_dqe_webgerest_cd45(
+                chemin_source, chemin_sortie, nom_fichier_pour_fournisseur=nom_fichier_registre)
+            return "bpu_webgerest_cd45", nb_lignes, []
         except CauseFormatInvalide as exc:
             return None, None, [exc.cause()]
     return None, None, [{

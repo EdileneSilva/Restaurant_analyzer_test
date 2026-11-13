@@ -74,7 +74,8 @@ def _pretraite_fichiers(fichiers):
             else:
                 erreurs.append(
                     f"**{nom_fichier}** : format non reconnu (ni REGAL, ni famille GRADA, ni "
-                    "une famille connue de a_formater/, ni déjà au format attendu) — ignoré."
+                    "une famille connue de a_formater/, ni BPU DQE Webgerest CD45, ni déjà au "
+                    "format attendu) — ignoré."
                 )
             continue
 

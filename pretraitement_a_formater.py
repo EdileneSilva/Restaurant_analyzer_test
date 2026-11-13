@@ -1457,6 +1457,29 @@ def _fournisseur_depuis_nom_fichier_bpu(nom_fichier):
     return m.group(1).strip() if m else nom
 
 
+def feuille_bpu_webgerest_cd45(ws):
+    """Détecte la feuille 'BPU - LOT N' de la famille "TR__BPU_pour_intégration_Webgerest_
+    CD45" (13 fichiers reçus le 2026-11-12) — par CONTENU (nom d'onglet + en-tête), PAS par nom
+    de fichier : contrairement aux 5 familles déjà connues de a_formater/ (noms de fichiers
+    fixes, connus à l'avance), celle-ci reçoit un fichier par fournisseur, à un nom différent
+    à chaque envoi — pas de registre possible, voir pretraitement_auto.detecte_format.
+    Distingue bien de l'autre famille déjà connue "BPU DQE" (transforme_bpu_dqe) : celle-ci a
+    une feuille "Page de Garde" + en-têtes "Familles"/"PU HT"/"Codes EAN", jamais "FAMILLE DE
+    PRODUITS"/"UNITE MINIMUM"/"UNITE DE VENTE" (propres à Webgerest CD45) — malgré un nom
+    d'onglet qui peut lui aussi commencer par "BPU" ("BPU Lot 3"), d'où la vérification de
+    l'en-tête en plus du nom d'onglet, pas l'un sans l'autre."""
+    if not pt._normalise(ws.title).startswith("bpu"):
+        return False
+    for r in range(1, 6):
+        textes = [pt._normalise(ws.cell(row=r, column=c).value)
+                  for c in range(1, min(ws.max_column, 15) + 1)]
+        if (any("famille de produits" in t for t in textes)
+                and any("unite minimum" in t for t in textes)
+                and any("unite de vente" in t for t in textes)):
+            return True
+    return False
+
+
 def transforme_bpu_dqe_webgerest_cd45(chemin_source, chemin_sortie, nom_fichier_pour_fournisseur=None):
     """Transforme un fichier de la famille "TR__BPU_pour_intégration_Webgerest_CD45" (13
     fichiers, un par fournisseur/lot). `nom_fichier_pour_fournisseur` : nom à utiliser pour en
@@ -1469,7 +1492,7 @@ def transforme_bpu_dqe_webgerest_cd45(chemin_source, chemin_sortie, nom_fichier_
     Unité de RÉFÉRENCE, pas sur l'Unité de commande, donc ce n'est pas écrit dans le fichier de
     sortie pour l'instant, juste renvoyé ici pour revue."""
     wb = openpyxl.load_workbook(chemin_source, data_only=True)
-    nom_aba_bpu = next((n for n in wb.sheetnames if pt._normalise(n).startswith("bpu")), None)
+    nom_aba_bpu = next((n for n in wb.sheetnames if feuille_bpu_webgerest_cd45(wb[n])), None)
     if not nom_aba_bpu:
         raise CauseFormatInvalide(
             "ONGLET_MANQUANT", f"Aucun onglet 'BPU - LOT N' trouvé dans {chemin_source}.",
