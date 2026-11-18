@@ -105,12 +105,14 @@ _MARGE_HORIZONTALE_PX = 16
 # (`BPF - LOT 5`, K163, 4 lignes : ~1/3 d'espace en trop) : la marge fixe de 14 px, qui pèse
 # peu sur un long commentaire, en représente une bien plus grande part sur un commentaire à
 # quelques lignes seulement — probablement en plus d'un padding déjà propre à Excel.
-# `_FACTEUR_HAUTEUR_LIGNE` réduit aussi légèrement la hauteur de ligne mesurée (ascent+descent)
-# elle-même, qui s'est avérée un peu généreuse : 4 lignes à 78 px (16 px/ligne + 14 de marge)
-# deviennent 4×13=52 px (-33%, exactement la proportion rapportée pour K163).
-_FACTEUR_HAUTEUR_LIGNE = 0.8125
+# 1ère correction (règle n°78, `_FACTEUR_HAUTEUR_LIGNE = 0.8125`, marge supprimée) trop
+# agressive : signalé le même jour, plusieurs colonnes (D/H/J/K/L) ont alors eu leur DERNIÈRE
+# LIGNE coupée — texte tronqué, pire qu'un peu d'espace en trop (qui restait, lui, acceptable
+# pour E/M/R). Revenu à la hauteur de ligne pleine (facteur 1.0) et remis une marge de
+# sécurité, mais petite (6 px, pas les 14 px d'origine) pour prioriser l'absence de troncature.
+_FACTEUR_HAUTEUR_LIGNE = 1.0
+_HAUTEUR_SURCHARGE_PX = 6
 _HAUTEUR_BASE_PX = 26
-_HAUTEUR_SURCHARGE_PX = 0
 
 # Signalé par l'utilisatrice le 2026-11-18 (même jour) : avec une largeur de caractère MOYENNE
 # (règles n°71-76), certaines bulles finissaient trop grandes, d'autres trop petites, sans

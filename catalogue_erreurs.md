@@ -1554,6 +1554,30 @@ s'il faut encore ajuster). Un commentaire court d'une ligne passe de 66 à 26 px
 de non-régression passent sans changement de total. Docker reconstruit, HTTP 200 vérifié.
 **Encore à confirmer visuellement — ces 3 constantes restent faciles à réajuster.**
 
+### 79. Règle n°78 trop agressive : texte TRONQUÉ (dernière ligne coupée) sur plusieurs colonnes
+
+Signalé par l'utilisatrice le 2026-11-18 (même jour), après vérification colonne par colonne :
+"a maior parte melhorou", mais colonnes D/K/L (dernière ligne manquante, "comme si une ligne a
+disparu"), H (bulles bleues : dernière ligne coupée en deux ; bulle rose : même problème que
+D), J (même problème, avec en plus le haut des lettres de la ligne suivante qui dépasse) —
+texte tronqué, PIRE que le léger surplus resté acceptable sur E ("tudo bem"), M (bulles violette
+et roses "parfaites", le reste un peu grand) et R ("ficou maior, parecido com E").
+
+Cause : la règle n°78 avait supprimé la marge de sécurité fixe en même temps que réduit la
+hauteur de ligne mesurée elle-même (`_FACTEUR_HAUTEUR_LIGNE = 0.8125`) — trop agressif cumulé,
+plusieurs bulles se sont retrouvées tout juste trop courtes pour leur dernier retour à la
+ligne. Un texte tronqué étant pire qu'un peu d'espace en trop (toléré par l'utilisatrice sur
+E/M/R), priorité donnée à ne plus jamais couper : `_FACTEUR_HAUTEUR_LIGNE` revenu à 1.0 (pleine
+hauteur ascent+descent de la police, sans réduction), une marge de sécurité réintroduite mais
+petite (`_HAUTEUR_SURCHARGE_PX` 0→6, loin des 14 px d'origine). `_HAUTEUR_BASE_PX` (26, visant
+les commentaires très courts) inchangé — aucune troncature ne lui avait été attribuée.
+
+Vérifié sur les mêmes exemples que la règle n°78 : `K163` 78→70 px (-10%, beaucoup plus
+prudent que les -33% précédents, qui coupaient le texte), `M107`/`M108` 190/174→182/166 px
+(-4%), un commentaire court d'une ligne 66→38 px. Les 3 suites de non-régression passent sans
+changement de total. Docker reconstruit, HTTP 200 vérifié. **Encore à confirmer visuellement —
+priorité donnée à l'absence de troncature plutôt qu'à la compacité maximale.**
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
