@@ -8,6 +8,7 @@ Pour l'instant : seul le catalogue au format REGAL est pris en charge
 (transforme_catalogue_regal).
 """
 
+import io
 import re
 import unicodedata
 
@@ -16,6 +17,7 @@ from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+import notes_excel
 from causes_format import CauseFormatInvalide
 
 COULEUR_ORIGINE_INCERTAINE = PatternFill(
@@ -583,5 +585,16 @@ def ecrit_classeur_canonique(lignes, chemin_sortie, nom_feuille):
     if lignes:
         _applique_grille_complete(ws_dst, 3, 2 + len(lignes))
 
-    wb_dst.save(chemin_sortie)
+    notes_excel.recalcule_toutes_les_notes(wb_dst, _dimensions_commentaire)
+    tampon = io.BytesIO()
+    wb_dst.save(tampon)
+    conteudo = notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue())
+    if hasattr(chemin_sortie, "write"):
+        chemin_sortie.seek(0)
+        chemin_sortie.truncate()
+        chemin_sortie.write(conteudo)
+        chemin_sortie.seek(0)
+    else:
+        with open(chemin_sortie, "wb") as f:
+            f.write(conteudo)
     return len(lignes)

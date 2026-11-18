@@ -33,6 +33,7 @@ import sys
 import tempfile
 
 import audit_general as audit
+import notes_excel
 import pretraitement_auto
 
 _WORKER_COMMENTAIRES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -146,12 +147,14 @@ def calcule_resultats(fichiers):
         noms, classeurs_valeurs, classeurs, contenus_transformes, flags_transforme
     ):
         resultats = audit.audite_classeur(wb_valeurs, wb, indice_prix)
+        notes_excel.recalcule_toutes_les_notes(wb, audit._dimensions_commentaire)
         tampon_xlsx = io.BytesIO()
         wb.save(tampon_xlsx)
+        xlsx_bytes = notes_excel.corrige_ancrage_apres_sauvegarde(tampon_xlsx.getvalue())
         fichiers_resultat.append({
             "nom": nom_fichier,
             "resultats": resultats,
-            "xlsx_bytes": tampon_xlsx.getvalue(),
+            "xlsx_bytes": xlsx_bytes,
             "xlsx_transforme_bytes": contenu_transforme,
             "a_ete_transforme": a_ete_transforme,
         })

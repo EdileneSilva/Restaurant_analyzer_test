@@ -1274,6 +1274,62 @@ référence n'a ce format de Conditionnement). Les 13 fichiers réels Webgerest 
 repassés en entier dans le pipeline complet (prétraitement + audit) après ces 6 règles
 (n°63-68) : aucune erreur, totaux de cellules marquées cohérents (`webgerest_cd45_commentado/`).
 
+### 69. La taille de bulle (règle n°60) ne se voyait pas dans Excel desktop, et se perdait dès que le fichier était rouvert
+
+Signalé par l'utilisatrice le 2026-11-18 : la règle n°60 (taille de bulle adaptée au texte)
+n'avait aucun effet visible dans Excel desktop sur le fichier réel téléchargé depuis Streamlit,
+alors qu'elle fonctionnait en test direct. Deux causes distinctes, trouvées en inspectant le
+XML du `.xlsx` généré :
+
+1. openpyxl n'écrit la taille voulue QUE dans le style VML (`width:...px;height:...px`), lu par
+   LibreOffice et Excel Online — mais pas par Excel desktop, qui se base sur l'élément
+   `<x:Anchor>` du VML pour la taille réelle de la bulle. openpyxl n'écrit JAMAIS cet élément
+   (vérifié dans son code source, `openpyxl.comments.shape_writer._shape_factory`) : sans lui,
+   Excel desktop retombe sur une taille par défaut quelle que soit la taille demandée.
+2. openpyxl ne conserve PAS `comment.width`/`comment.height` quand il RELIT un fichier déjà
+   sauvegardé (vérifié directement : une bulle sauvegardée à 320×150 revient à 144×79, les
+   valeurs par défaut, dès le premier rechargement) — or le pipeline réel sauvegarde deux fois
+   de suite (prétraitement, puis audit qui rouvre ce même fichier) : toute bulle posée par le
+   prétraitement perd donc sa taille avant même que le code de l'audit ne s'exécute, que la
+   cellule soit retouchée par l'audit ou non.
+
+Corrigé dans un nouveau module `notes_excel.py` : `recalcule_toutes_les_notes()` recalcule la
+taille de TOUTES les bulles du classeur juste avant chaque sauvegarde finale (pas seulement
+celles que le script courant vient de modifier — répare la cause 2) ; `corrige_ancrage_apres_
+sauvegarde()` relit le `.xlsx` déjà sauvegardé et injecte un `<x:Anchor>` calculé pour chaque
+bulle (répare la cause 1), avec la même formule (largeur de colonne/hauteur de ligne PAR DÉFAUT
+d'Excel, en pixels) que la bibliothèque XlsxWriter utilise pour ses propres bulles de
+commentaire — approximatif si le fichier a des largeurs de colonne personnalisées (non prises
+en compte, pour rester simple), mais largement suffisant pour que le texte ne soit plus coupé.
+Branché aux 7 points de sauvegarde finale réels du pipeline : `pretraitement.py`
+(`ecrit_classeur_canonique`), `pretraitement_auto.py` (complétion de colonne), `pretraitement_
+a_formater.py` (commentaire Local), `audit_pipeline.py` (`calcule_resultats`, utilisé par
+Streamlit), `audit_commentaires_worker.py` (sous-processus utilisé par Streamlit pour l'autre
+moteur), et les deux `main()` CLI de `audit_general.py`/`audit_general_commentaires.py`.
+
+Validé bout en bout avec de vrais fichiers, en passant par le même chemin de code que
+Streamlit (`audit_pipeline.calcule_resultats`/`calcule_resultats_commentaires`) : sur `2026 09
+22 Base article groupement 1.xlsx`, 686 bulles (moteur général) et 676 bulles (moteur
+commentaires) ont toutes un `<x:Anchor>` cohérent avec leur taille, et le fichier se rouvre
+sans erreur dans openpyxl. Sur un fichier Episaveurs réel (`a_formater/`) et un fichier
+Webgerest CD45 réel (download "formaté" seul, avant tout audit), les bulles posées par le
+prétraitement (Unité/Origine/Local) ont également leur `<x:Anchor>`. Les 13 fichiers réels
+Webgerest CD45 ont été repassés en entier dans les deux moteurs sans erreur. Les 3 suites de
+non-régression passent sans changement de total (la taille/l'ancrage de la bulle n'influence
+aucune décision de couleur/colonne).
+
+### 70. Préfixe "[Fournisseur N]" dans chaque commentaire, redondant avec la position de la cellule dans le fichier
+
+Demandé par l'utilisatrice le 2026-11-18 : `marque()` préfixait systématiquement le texte du
+commentaire avec `[Fournisseur N]` (le nom du bloc Fournisseur concerné) — inutile, puisque la
+cellule commentée est déjà, par construction, dans les colonnes du bloc Fournisseur en
+question : la personne qui relit le fichier voit déjà de quelles données il s'agit sans ce
+rappel. Corrigé en retirant ce préfixe dans `marque()` (`audit_general.py`,
+`audit_general_commentaires.py`) ; le paramètre `fournisseur_nom` reste accepté (pour ne pas
+devoir changer tous les appels existants) mais n'est plus utilisé dans le texte. Validé sur un
+fichier réel (`2026 09 22 Base article groupement 1.xlsx`) : plus aucun commentaire ne contient
+"[Fournisseur". Les 3 suites de non-régression passent sans changement de total.
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du

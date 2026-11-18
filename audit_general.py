@@ -36,6 +36,7 @@ Usage :
     transformed_files/)
 """
 
+import io
 import os
 import re
 import statistics
@@ -49,6 +50,8 @@ import first_scripts.first_attempt_v2_prototype as motor  # noqa: E402  (règles
 import openpyxl
 from openpyxl.comments import Comment
 from openpyxl.styles import PatternFill, Font, Alignment
+
+import notes_excel
 
 # ============================================================================
 # DOSSIERS
@@ -2774,9 +2777,11 @@ def normalise_ecriture_unite_ref(valeur):
 
 
 def marque(cel, couleur, fournisseur_nom, texte):
+    # `fournisseur_nom` n'est plus utilisé dans le texte : redondant, déjà clair depuis le
+    # fichier (demandé par l'utilisatrice le 2026-11-18) — gardé en paramètre pour ne pas
+    # devoir changer tous les appels existants.
     cel.fill = PatternFill(start_color=couleur, end_color=couleur, fill_type="solid")
-    prefixe = f"[{fournisseur_nom}] " if fournisseur_nom else ""
-    _pose_commentaire(cel, f"{prefixe}{texte}")
+    _pose_commentaire(cel, texte)
 
 
 RE_CATEGORIE_LEGUME = re.compile(r"l[ée]gume|verdure|fruit", re.I)
@@ -4328,7 +4333,11 @@ def main():
                 f.write(resultat["rapport"])
 
         chemin_sortie = os.path.join(DOSSIER_SORTIE, f"{nom_base} - audit.xlsx")
-        wb.save(chemin_sortie)
+        notes_excel.recalcule_toutes_les_notes(wb, _dimensions_commentaire)
+        tampon = io.BytesIO()
+        wb.save(tampon)
+        with open(chemin_sortie, "wb") as f:
+            f.write(notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue()))
         print(f"  Fichier enregistré : {chemin_sortie}")
 
     print("\nTerminé. Aucun prix ni unité n'a été modifié dans les fichiers sources — seules "

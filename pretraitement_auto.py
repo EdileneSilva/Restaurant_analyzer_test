@@ -33,6 +33,7 @@ from copy import copy
 
 import openpyxl
 
+import notes_excel
 import pretraitement as pt
 import pretraitement_grada as pg
 import pretraitement_a_formater as paf
@@ -204,7 +205,18 @@ def complete_colonnes_canonique_incomplet(chemin_source, chemin_sortie):
                 1 for r in range(ligne_entete + 1, ws.max_row + 1)
                 if col_designation and ws.cell(row=r, column=col_designation).value)
             premiere_feuille_traitee = True
-    wb.save(chemin_sortie)
+    notes_excel.recalcule_toutes_les_notes(wb, pt._dimensions_commentaire)
+    tampon = io.BytesIO()
+    wb.save(tampon)
+    conteudo = notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue())
+    if hasattr(chemin_sortie, "write"):
+        chemin_sortie.seek(0)
+        chemin_sortie.truncate()
+        chemin_sortie.write(conteudo)
+        chemin_sortie.seek(0)
+    else:
+        with open(chemin_sortie, "wb") as f:
+            f.write(conteudo)
     return nb_lignes
 
 
