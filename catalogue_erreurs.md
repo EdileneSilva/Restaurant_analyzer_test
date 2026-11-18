@@ -1330,6 +1330,37 @@ devoir changer tous les appels existants) mais n'est plus utilisé dans le texte
 fichier réel (`2026 09 22 Base article groupement 1.xlsx`) : plus aucun commentaire ne contient
 "[Fournisseur". Les 3 suites de non-régression passent sans changement de total.
 
+### 71. Police des commentaires fixée (Calibri 8) et bulle recalculée en conséquence
+
+Demandé par l'utilisatrice le 2026-11-18, après la règle n°69 : plutôt que de dépendre du
+réglage "police des commentaires" de l'Excel de qui ouvre le fichier (variable d'un poste à
+l'autre — important puisqu'elle teste en parallèle sur un PC Windows), fixer la police à
+Calibri 8 pt pour tout le monde, et recalculer la taille de bulle pour cette police (plus
+compacte qu'avec la police par défaut, plus grande utilisée jusque-là). openpyxl n'offre aucune
+API pour écrire la police d'un commentaire (`Comment` n'écrit jamais de run enrichi `<r><rPr>`
+dans `xl/comments/*.xml`, seulement un `<t>` nu) : ajouté à `notes_excel.py`
+(`_applique_police_comments_xml()`, appelé par `corrige_ancrage_apres_sauvegarde()`), qui
+enveloppe le texte de chaque commentaire déjà sauvegardé dans un run avec `rFont="Calibri"`/
+`sz="8"`.
+
+Taille de bulle recalculée en conséquence dans `notes_excel.dimensions_commentaire()` (nouvelle
+fonction centralisée, dont délèguent maintenant les 3 `_dimensions_commentaire()` locaux de
+`pretraitement.py`, `audit_general.py`, `audit_general_commentaires.py` — plus de triple
+duplication des constantes de taille) : largeur de caractère Calibri ~7 px à 11 pt (constante
+XlsxWriter, voir règle n°69) mise à l'échelle pour 8 pt ≈ 5,1 px/caractère. Proportion ajustée
+une seconde fois le même jour, à la demande de l'utilisatrice (bulle plus étroite et plus haute
+plutôt qu'une réduction uniforme) : largeur 200 px, 39 caractères/ligne, hauteur 75 + 16 px par
+ligne. Ces 4 constantes restent faciles à ajuster si la vérification visuelle dans Excel
+(Windows) en montre le besoin.
+
+Validé bout en bout avec un fichier réel (`2026 09 22 Base article groupement 1.xlsx`), par le
+même chemin de code que Streamlit : 686 commentaires ont tous `rFont="Calibri"`/`sz="8"` dans
+`xl/comments/comment1.xml` ET `<x:Anchor>` dans la VML, le fichier se rouvre sans erreur dans
+openpyxl. Les 13 fichiers réels Webgerest CD45 passent sans erreur dans les deux moteurs. Les 3
+suites de non-régression passent sans changement de total (aucune de ces tests n'appelle le
+chemin de sauvegarde finale où `notes_excel` intervient — la police/taille de bulle n'influence
+de toute façon aucune décision de couleur/colonne).
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
