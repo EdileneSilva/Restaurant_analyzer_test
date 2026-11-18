@@ -1024,6 +1024,312 @@ Validé : les 2 suites de non-régression concernées (`audit_general`/`audit_co
 casse de ces deux mots ne change aucune décision de couleur/colonne, seulement le texte final
 écrit).
 
+### 60. Taille des bulles de commentaire Excel, jusque-là fixe et trop petite pour le texte
+
+Demandé par l'utilisatrice le 2026-11-13, pour la personne du métier qui relit les fichiers
+audités : openpyxl pose une taille de bulle FIXE (79 × 144 points) pour tout commentaire créé
+avec `Comment(...)`, quel que soit le texte — beaucoup trop petit dès qu'un commentaire dépasse
+une ou deux courtes phrases, ce qui est fréquent ici (plusieurs règles peuvent accumuler
+plusieurs messages sur la même cellule, séparés par une ligne vide). Résultat avant correction :
+la personne devait agrandir la bulle à la main à chaque fois pour lire le texte en entier au
+survol.
+
+Corrigé en calculant la taille (largeur fixe 320 points, hauteur proportionnelle au nombre de
+lignes estimées, 58 caractères par ligne à cette largeur) à chaque fois qu'un commentaire est
+posé OU complété — centralisé dans une nouvelle fonction `_pose_commentaire()` (`audit_general.py`,
+`audit_general_commentaires.py`, `pretraitement.py`), qui remplace tous les endroits qui
+créaient/complétaient un commentaire à la main (dont `marque()`, le point d'entrée le plus
+utilisé). `pretraitement_a_formater.py` réutilise `pt._pose_commentaire` au lieu d'une 4e copie.
+
+Validé sur un fichier réel (`2026 09 22 Base article groupement 1.xlsx`) : 686 commentaires
+posés par l'audit ont tous une largeur de 320 (au lieu de 144), et une hauteur qui grandit bien
+avec le texte (79 pour les plus courts, jusqu'à 188 pour un commentaire de 687 caractères) — les
+deux commentaires du MODÈLE lui-même (déjà présents dans le fichier source, en ligne 2
+d'en-tête, jamais touchés par ce code) restent à la taille d'origine, comme attendu. Les 3
+suites de non-régression passent sans changement de total (la taille de la bulle n'influence
+aucune décision de couleur/colonne).
+
+### 61. Conditionnement traité comme un diviseur/multiplicateur obligé du prix, même quand Unité de référence = Unité de commande (brutes) et prix déjà identiques
+
+Demandé par l'utilisatrice le 2026-11-13, sur `MDC_IMPORT_MARCHE - Lots frais 2026 exel.xlsx` :
+des lignes comme "Emincé épaule de porc - sachet 2kg" (BPF Lot 11-style, Unité de référence et
+Unité de commande BRUTES valant toutes les deux "kg", Prix de référence = Prix de commande =
+6,05€, Conditionnement "2kg") étaient signalées à tort — la colonne K (Prix de référence) ET la
+colonne M (Prix de commande) recevaient chacune un message redondant ("deux lectures possibles")
+proposant de diviser/multiplier le prix par le poids lu dans le Conditionnement, alors que
+l'unité de référence et l'unité de commande sont déjà le même mot et que le prix est déjà
+cohérent des deux côtés. Le "2kg" du Conditionnement ne fait ici que décrire le poids typique de
+la pièce vendue au kilo, pas un contenant group dont il faudrait "déplier" le prix.
+
+Règle demandée : quand Unité de référence et Unité de commande (telles qu'écrites dans le
+fichier, avant toute normalisation/substitution) sont le même mot ET que Prix de référence =
+Prix de commande, ne plus proposer de changement de prix basé sur le Conditionnement — seules
+des suggestions d'unité plus précise (KG/L selon le Conditionnement, PIECE, ou PAQUET avec
+Nombre de pièces à remplir) restent pertinentes, jamais un recalcul de prix.
+
+Corrigé dans `_traite_ligne_etendue_nucleo` (`audit_general.py` et
+`audit_general_commentaires.py`, même structure de code dans les deux) : juste après le calcul
+de `k_change = diff_relative > TOLERANCE_RATIO`, ajout d'un garde-fou qui le remet à `False`
+quand `abs(prix_ref - prix_cmd) < 0.005` ET que l'Unité de commande brute normalisée est égale à
+l'Unité de référence brute normalisée. Ce seul changement éteint aussi, par ricochet, le message
+redondant que posait `verifie_coherence_unite_prix_identiques` (règle du 2026-11-09 ci-dessus)
+sur la même cellule, puisque son déclencheur (`resultat.nouveau_k is not None`) devient
+naturellement `False`.
+
+Validé sur les lignes réelles concernées de `MDC_IMPORT_MARCHE` : plus aucun commentaire sur K
+ni sur M pour ces cas. Sur ~90 lignes de ce fichier où Unité de référence = Unité de commande
+(brutes), seules 2 lignes avaient `diff_relative > TOLERANCE_RATIO` et étaient donc réellement
+affectées par ce correctif (les autres étaient déjà dans la tolérance avant, donc invisibles).
+`TOTAUX["MDC_IMPORT_MARCHE..."]` passe de `(193, 721)` à `(191, 704)` dans
+`test_non_regression_audit_general.py`, `TOTAUX_CELLULES["MDC_IMPORT_MARCHE..."]` de `744` à
+`727` dans `test_non_regression_audit_commentaires.py`. Les 6 autres fichiers de référence
+restent strictement identiques (aucune ligne chez eux avec Unité de référence = Unité de
+commande brutes ET prix déjà identiques ET hors tolérance). Les 3 suites de non-régression
+passent ; Docker reconstruit, HTTP 200 vérifié.
+
+### 62. Même contradiction sur un contenant nommé (pas une unité de poids), avec substitution automatique en plus du prix
+
+Signalé par l'utilisatrice le même jour (2026-11-13), cas distinct de la règle n°61 ci-dessus
+bien que de la même famille de symptôme : `POMONA EPISAVEUR - LOT 7`, ligne 60, "Caissettes
+muffin x300" — Unité de référence = Unité de commande (brutes) = "Colis", Prix de référence =
+Prix de commande = 24,89€, Conditionnement "Colis de 300 pièces". Ce cas passe par un chemin de
+code différent de la règle n°61 : le moteur partagé (`first_scripts/first_attempt_v2_prototype.py`,
+branche `PACKAGE_TYPES`, déjà documentée comme règle n°58 non résolue — voir plus haut, les 4
+exemples de cette règle ont Unité de référence ≠ Unité de commande brutes et restent donc hors
+de ce correctif) proposait `nouveau_d="PC"` + un nouveau prix (prix/300) + `nouveau_l` = l'unité
+de référence brute, et la fonction existante `reconsidere_contenant_nombre_pieces` (qui se
+déclenche dès que `nouveau_d=="PC"` et `nouveau_l` == unité de référence brute) renommait ensuite
+L en "CARTON" via la substitution officielle CONTENANT_ABREGE (colis→CARTON, substitution déjà
+établie ailleurs dans ce moteur — pas concernée par la règle mémoire "pas de substitution pour
+Webgerest CD45", qui ne s'applique qu'à l'étape de transformation de cette famille-là, pas à la
+logique propre d'`audit_general.py`).
+
+Demande de l'utilisatrice : annuler entièrement la proposition de prix, ne RIEN renommer (ni D
+ni L), et à la place poser uniquement une question sur D (Unité de référence) — "êtes-vous
+sûr(e) ?" — en suggérant PAQUET (avec Nombre de pièces à remplir) si le Conditionnement révèle un
+comptage de pièces.
+
+Implémenté : nouvelle fonction `reconsidere_contenant_seul_deja_coherent(resultat, unite_ref,
+unite_cmd, conditionnement, prix_ref, prix_cmd)` dans les deux moteurs, appelée en tout premier
+parmi les fonctions `reconsidere_*`, juste après `motor.traite_ligne()` — avant
+`reconsidere_prix_inexplique`, `reconsidere_recipient_de_1_unite`,
+`reconsidere_ratio_un_contre_contenant` et `reconsidere_contenant_nombre_pieces`. Condition :
+`resultat.nouveau_d == "PC"`, `resultat.nouveau_k is not None`, Unité de commande brute
+normalisée == Unité de référence brute normalisée, et prix identiques (±0,005€). Action :
+remet `nouveau_d`/`nouveau_k`/`couleur_k`/`commentaire_k` à `None`, et — point important trouvé
+en déboguant — fixe explicitement `resultat.nouveau_l = unite_ref` (la valeur brute inchangée,
+PAS `None`) : mettre `nouveau_l` à `None` ne suffisait pas, car cela laissait passer
+`reconsidere_mot_litteral_non_reconnu` (garde-fou : `if resultat.nouveau_l is not None: return`),
+une fonction indépendante qui renommait alors L en "CARTON" par son propre chemin, sans rapport
+avec `reconsidere_contenant_nombre_pieces`. Fixer `nouveau_l` à la valeur brute inchangée bloque
+ce garde-fou tout en n'écrivant visuellement aucun changement. Pose `couleur_d =
+motor.COULEUR_A_VERIFIER` et un nouveau commentaire sur D expliquant : unité de référence et de
+commande identiques, même prix, rien à corriger côté prix — mais le Conditionnement pourrait
+justifier PAQUET + Nombre de pièces (compte extrait via `motor.extraire_nombre_pieces` sur le
+Conditionnement, ou suggestion générique KG/L/PC si aucun compte n'est trouvé) ; demande
+explicitement confirmation, rien n'est changé automatiquement.
+
+Validé sur la ligne réelle (`POMONA EPISAVEUR - LOT 7`, ligne 60) : D reste "COLIS" (normalisation
+majuscule déjà existante, sans rapport avec ce correctif) avec la nouvelle question en
+commentaire ; L reste "COLIS" sans aucun commentaire ; K n'a plus aucun commentaire. Les 3 suites
+de non-régression passent SANS AUCUN changement de total sur les 7 fichiers de référence (les 4
+exemples de la règle n°58 dans MDC_IMPORT_MARCHE ont Unité de référence ≠ Unité de commande
+brutes, donc ce correctif, volontairement étroit, ne les touche pas — la règle n°58 reste donc
+non résolue). Docker reconstruit, HTTP 200 vérifié.
+
+### 63. "Bib" (Bag-in-Box) non reconnu comme contenant, signalé à tort comme ne correspondant pas à l'emballage
+
+Signalé par l'utilisatrice le 2026-11-13 sur `LOGIFRAIS - LOT 13`, ligne 3 : Conditionnement
+"Bib 10kg", Unité de commande "Bib" (littéral) — l'audit disait "l'unité de commande ne semble
+pas correspondre à l'emballage", alors que "Bib" est bel et bien écrit dans le Conditionnement.
+Cause : "bib" était simplement absent de toutes les listes de mots de contenant reconnus
+(`MOTS_CONTENANT`, `_MOTS_CONTENANT_CANONIQUES`, `mots_types` dans
+`verifie_unite_commande_etendue`, les deux moteurs). Corrigé en l'ajoutant à ces listes, SANS
+l'ajouter à `CONTENANT_ABREGE` — "Bib" reste donc écrit tel quel, jamais substitué
+automatiquement (cohérent avec la règle mémoire "Webgerest CD45 sans substitution" : la
+décision d'un éventuel équivalent officiel est différée, pas prise ici). Validé : plus aucun
+commentaire sur cette ligne. Les 3 suites de non-régression passent sans changement de total.
+
+### 64. "Catégorie légume/fruit → SAC par défaut" appliquée à tort à un liquide embouteillé
+
+Signalé le même jour sur `LOGIFRAIS - LOT 13`, ligne 8 : "Jus de pommes bio 1L", Lot "JUS DE
+FRUIT", Conditionnement "x6bt" (déjà résolu en "CARTON" par le prétraitement) — `applique_defaut_
+legume` (règle du 2026-11-10 : quand rien n'explique le prix pour un produit "légume/fruit",
+deviner "SAC" par défaut) s'est déclenchée uniquement parce que le nom du Lot contient le mot
+"fruit", sans rapport avec le fait que ce soit une vraie denrée en vrac — un jus de fruit en
+bouteille n'a aucune raison d'être dans un "SAC". Corrigé en ajoutant un paramètre `unite_ref` à
+cette fonction (les deux moteurs) et en l'excluant totalement quand l'unité de référence est
+'L'/'litre' (les liquides ne sont jamais vendus "au sac"). Validé sur la ligne réelle : plus de
+proposition "SAC". Les 3 suites de non-régression passent sans changement de total (aucune ligne
+des 7 fichiers de référence n'est une catégorie légume/fruit en L).
+
+### 65. Messages D/K/L/M génériques qui jettent l'explication déjà écrite par la règle d'origine
+
+Trouvé en creusant les lignes 5-6/12-18 de `LOGIFRAIS - LOT 13` (`audit_general_commentaires.py`
+seulement — `audit_general.py` ne fait pas cette erreur, il réutilise déjà `resultat.commentaire_
+*` partout) : quatre blocs de la boucle d'audit principale (D, le "if k_differe" de K, L, M)
+reconstruisaient leur propre texte générique ("D'après la comparaison des prix...", "ne semble
+pas correspondre à l'emballage...") au lieu de reprendre `resultat.commentaire_d/k/l/m`, déjà
+préparé par la règle qui a posé le signalement et contenant l'explication précise (le calcul
+exact, le Conditionnement en cause, une question de vérification ciblée...). Ce même bug avait
+déjà été identifié et corrigé une fois pour K (2026-11-10, voir le commentaire resté dans le
+code à l'endroit du `elif`), mais seulement sur UNE des deux branches qui gèrent K, jamais sur
+D/L/M. Conséquence concrète : la question de vérification posée par la nouvelle règle n°68
+ci-dessous (ligne 5-6, "Pot ind x24pc") disparaissait complètement, remplacée par "L'unité de
+commande ('POT') ne semble pas correspondre à l'emballage — à vérifier à la main", qui ne dit
+rien du ratio pourtant confirmé.
+
+Corrigé en supprimant la reconstruction de texte dans les 4 blocs et en réutilisant directement
+`resultat.couleur_d/k/l/m` + `resultat.commentaire_d/k/l/m` — sûr car `traite_ligne_etendue()`
+garantit déjà, via sa boucle de garde-fou finale, qu'un commentaire minimal existe dès qu'une
+couleur est posée (donc jamais de commentaire vide affiché). Validé : les lignes 12-18
+expliquent maintenant explicitement le calcul par le Conditionnement (voir règle n°66 ci-dessous
+pour le contenu exact), la ligne 5-6 affiche la vraie question de vérification. Les 3 suites de
+non-régression passent SANS AUCUN changement de total sur les 7 fichiers de référence (le
+contenu du texte change, jamais la couleur posée sur la cellule ni le fait qu'un commentaire
+existe).
+
+### 66. Comptage × poids d'un conditionnement jamais multiplié quand l'ordre ou le format est inhabituel
+
+Quatre formats de Conditionnement, tous réels (`LOGIFRAIS - LOT 13`, lignes 30/40/45/46/52),
+n'étaient reconnus par AUCUNE fonction d'extraction de quantité, laissant le prix signalé à tort
+comme "inexpliqué" alors que le calcul colle exactement :
+- "Carton x6Bt"/"Colis x6Bt" (compte collé au "x", sans poids dans le Conditionnement lui-même
+  — voir aussi la règle n°67 pour le poids pris dans la Désignation).
+- "Barquette 25x130gr env" : la quantité (25×130g = 3,25kg) n'était jamais multipliée — seul le
+  poids d'UNE pièce (130g) était trouvé par la recherche en texte libre, et le "env" final
+  cassait de toute façon les motifs stricts ancrés en fin de chaîne (`RE_CONTENANT_PUIS_MULT`
+  attend `$` juste après l'unité).
+- "Barquette 10x140/150gr env" : même problème, plus une fourchette de poids ("140/150") que
+  rien ne savait découper.
+- "POT de 500 g x 5" (compte APRÈS le poids, pas avant) : aucun motif ne gère cet ordre pour un
+  calcul de quantité TOTALE (seul `RE_CONTENANT_POIDS_PUIS_X`, utilisé ailleurs pour le poids
+  PAR PIÈCE quand l'unité de référence est déjà "PC", existait dans cet ordre).
+
+Corrigé en ajoutant deux nouvelles regex de recherche libre (pas ancrées en `$`, donc un "env"
+final ne casse plus rien) à `_cherche_candidats_quantite_libre` (les deux moteurs) :
+`RE_MULTIPLICATEUR_CONTENANT_X_LIBRE` ("CONTENANT Nx POIDS[/POIDS2]UNITÉ") et son symétrique
+`..._INVERSE` ("CONTENANT (de)? POIDS[/POIDS2]UNITÉ x N"). Une fourchette ("140/150") ajoute LES
+DEUX bornes comme candidats séparés (10×140g=1,4kg ET 10×150g=1,5kg), plutôt que de deviner une
+moyenne — le reste du code (déjà écrit pour essayer plusieurs candidats) teste chacune contre le
+ratio observé et retient celle qui colle, sans qu'aucune tolérance n'ait besoin d'être élargie
+(la borne haute de "140/150gr" colle à 0,02% du ratio réel de la ligne 46).
+
+Validé sur les 4 lignes réelles : plus aucun signalement de prix inexpliqué, dans les deux
+moteurs. Les 3 suites de non-régression passent sans changement de total sur les 7 fichiers de
+référence (aucun d'eux n'a de Conditionnement dans ces formats précis).
+
+### 67. Comptage du Conditionnement jamais confronté au poids/volume unitaire donné par la Désignation
+
+Deux cas réels distincts, mais la même cause : le Conditionnement donne un NOMBRE d'unités sans
+aucun poids/volume, et c'est la Désignation (article ou fournisseur) qui précise le poids/volume
+d'UNE unité — jamais rapprochés l'un de l'autre avant ce correctif.
+- `LOGIFRAIS - LOT 13`, ligne 7 : "Carton 6 bouteilles" (6 pièces, aucun poids) + désignation
+  "Jus de poires HVE 1L" (1L par bouteille) → 6 × 1L = 6, exactement le ratio Prix commande ÷
+  Prix référence observé (18€ ÷ 3€). Avant ce correctif, `reconsidere_prix_inexplique`
+  concluait directement "L'unité de référence devrait peut-être être 'PC' plutôt que 'L'" sans
+  avoir cherché le poids par pièce dans la Désignation — une fausse piste, alors que 'L' était
+  déjà la bonne lecture.
+- Lignes 8/30/40 : Conditionnement en compte nu ("x6bt", "Carton x6Bt", "Colis x6Bt" — voir la
+  nouvelle regex `RE_MULTIPLICATEUR_BARE`, un mot de contenant optionnel + "x" + N + un code
+  abrégé quelconque jamais utilisé) combiné à "... 1L"/"... 750mL" dans la Désignation : 6×1L=6
+  ou 6×0,75L=4,5, collant exactement aux ratios observés (lignes 8, 40 et 30 respectivement).
+
+Corrigé à deux endroits (les deux moteurs) : (1) dans la branche `RE_CONTENANT_PIECES_SEULEMENT`
+de `reconsidere_prix_inexplique`, le nombre de pièces du Conditionnement est maintenant multiplié
+par le poids/volume unitaire trouvé dans la Désignation AVANT de conclure que l'unité de
+référence devrait changer — si ça colle, rien n'est signalé du tout ; (2) un nouveau bloc,
+juste après le calcul du ratio, essaie `RE_MULTIPLICATEUR_BARE` (Conditionnement) × le
+poids/volume unitaire (Désignation) en premier recours, avant toute autre recherche.
+
+Validé sur les 4 lignes réelles : ligne 7 ne signale plus rien (D reste 'L') ; lignes 8/30/40 ne
+signalent plus rien non plus. Les 3 suites de non-régression passent sans changement de total.
+
+### 68. "PC"/"unité" avec un comptage abrégé non reconnu ('xNpc') : conversion KG proposée sans aucune base
+
+Signalé le 2026-11-13 sur `LOGIFRAIS - LOT 13`, lignes 5-6 : Unité de référence "PC" (alias
+interne "unité"), Conditionnement "Pot ind x24pc", poids par pièce déjà renseigné (0,11 kg,
+extrait de la Désignation par le prétraitement). Le ratio Prix commande ÷ Prix référence
+(21,97€ ÷ 0,92€ = 23,88) est à moins de 0,5% de 24 — exactement le compte du Conditionnement —
+mais AUCUNE règle nulle part ne reconnaissait ce format abrégé ("x24pc", sans espace, "pc" pas
+"pièces") comme un comptage de pièces : la branche `'unite'/'piece'` du moteur partagé
+(`ALIAS_UNITE_REF`) ne connaît que la conversion en KG via le poids déjà rempli en E, et
+proposait donc de changer l'unité de référence en 'KG' et de recalculer un prix de référence —
+sans aucune base textuelle pour ce choix, l'utilisatrice l'a confirmé ("não tem nada que te
+permita dizer isso").
+
+Corrigé en ajoutant, juste avant l'appel à `ALIAS_UNITE_REF`/`motor.traite_ligne`, une
+vérification avec la nouvelle regex `RE_MULTIPLICATEUR_BARE` (voir règle n°67) : si elle trouve
+un compte N et que le ratio colle à N (tolérance standard), on NE propose ni KG ni aucun
+renommage automatique — l'unité de référence reste 'PC', et on pose une question de
+vérification sur l'unité de commande ("'POT' désigne-t-il bien ce groupe de 24, ou une seule
+unité ?"), sans deviner de réponse (même esprit que la règle n°62 : le prix est cohérent, c'est
+le NOM du contenant qui reste à vérifier par une personne).
+
+Validé sur les 2 lignes réelles (5 et 6, mêmes Conditionnement/ratio) : D reste 'PC', K n'a plus
+de suggestion de prix, L porte la question de vérification — visible seulement grâce à la
+règle n°65 ci-dessus (sans elle, le message restait caché derrière le texte générique). Les 3
+suites de non-régression passent sans changement de total (aucune ligne des 7 fichiers de
+référence n'a ce format de Conditionnement). Les 13 fichiers réels Webgerest CD45 ont été
+repassés en entier dans le pipeline complet (prétraitement + audit) après ces 6 règles
+(n°63-68) : aucune erreur, totaux de cellules marquées cohérents (`webgerest_cd45_commentado/`).
+
+### 69. La taille de bulle (règle n°60) ne se voyait pas dans Excel desktop, et se perdait dès que le fichier était rouvert
+
+Signalé par l'utilisatrice le 2026-11-18 : la règle n°60 (taille de bulle adaptée au texte)
+n'avait aucun effet visible dans Excel desktop sur le fichier réel téléchargé depuis Streamlit,
+alors qu'elle fonctionnait en test direct. Deux causes distinctes, trouvées en inspectant le
+XML du `.xlsx` généré :
+
+1. openpyxl n'écrit la taille voulue QUE dans le style VML (`width:...px;height:...px`), lu par
+   LibreOffice et Excel Online — mais pas par Excel desktop, qui se base sur l'élément
+   `<x:Anchor>` du VML pour la taille réelle de la bulle. openpyxl n'écrit JAMAIS cet élément
+   (vérifié dans son code source, `openpyxl.comments.shape_writer._shape_factory`) : sans lui,
+   Excel desktop retombe sur une taille par défaut quelle que soit la taille demandée.
+2. openpyxl ne conserve PAS `comment.width`/`comment.height` quand il RELIT un fichier déjà
+   sauvegardé (vérifié directement : une bulle sauvegardée à 320×150 revient à 144×79, les
+   valeurs par défaut, dès le premier rechargement) — or le pipeline réel sauvegarde deux fois
+   de suite (prétraitement, puis audit qui rouvre ce même fichier) : toute bulle posée par le
+   prétraitement perd donc sa taille avant même que le code de l'audit ne s'exécute, que la
+   cellule soit retouchée par l'audit ou non.
+
+Corrigé dans un nouveau module `notes_excel.py` : `recalcule_toutes_les_notes()` recalcule la
+taille de TOUTES les bulles du classeur juste avant chaque sauvegarde finale (pas seulement
+celles que le script courant vient de modifier — répare la cause 2) ; `corrige_ancrage_apres_
+sauvegarde()` relit le `.xlsx` déjà sauvegardé et injecte un `<x:Anchor>` calculé pour chaque
+bulle (répare la cause 1), avec la même formule (largeur de colonne/hauteur de ligne PAR DÉFAUT
+d'Excel, en pixels) que la bibliothèque XlsxWriter utilise pour ses propres bulles de
+commentaire — approximatif si le fichier a des largeurs de colonne personnalisées (non prises
+en compte, pour rester simple), mais largement suffisant pour que le texte ne soit plus coupé.
+Branché aux 7 points de sauvegarde finale réels du pipeline : `pretraitement.py`
+(`ecrit_classeur_canonique`), `pretraitement_auto.py` (complétion de colonne), `pretraitement_
+a_formater.py` (commentaire Local), `audit_pipeline.py` (`calcule_resultats`, utilisé par
+Streamlit), `audit_commentaires_worker.py` (sous-processus utilisé par Streamlit pour l'autre
+moteur), et les deux `main()` CLI de `audit_general.py`/`audit_general_commentaires.py`.
+
+Validé bout en bout avec de vrais fichiers, en passant par le même chemin de code que
+Streamlit (`audit_pipeline.calcule_resultats`/`calcule_resultats_commentaires`) : sur `2026 09
+22 Base article groupement 1.xlsx`, 686 bulles (moteur général) et 676 bulles (moteur
+commentaires) ont toutes un `<x:Anchor>` cohérent avec leur taille, et le fichier se rouvre
+sans erreur dans openpyxl. Sur un fichier Episaveurs réel (`a_formater/`) et un fichier
+Webgerest CD45 réel (download "formaté" seul, avant tout audit), les bulles posées par le
+prétraitement (Unité/Origine/Local) ont également leur `<x:Anchor>`. Les 13 fichiers réels
+Webgerest CD45 ont été repassés en entier dans les deux moteurs sans erreur. Les 3 suites de
+non-régression passent sans changement de total (la taille/l'ancrage de la bulle n'influence
+aucune décision de couleur/colonne).
+
+### 70. Préfixe "[Fournisseur N]" dans chaque commentaire, redondant avec la position de la cellule dans le fichier
+
+Demandé par l'utilisatrice le 2026-11-18 : `marque()` préfixait systématiquement le texte du
+commentaire avec `[Fournisseur N]` (le nom du bloc Fournisseur concerné) — inutile, puisque la
+cellule commentée est déjà, par construction, dans les colonnes du bloc Fournisseur en
+question : la personne qui relit le fichier voit déjà de quelles données il s'agit sans ce
+rappel. Corrigé en retirant ce préfixe dans `marque()` (`audit_general.py`,
+`audit_general_commentaires.py`) ; le paramètre `fournisseur_nom` reste accepté (pour ne pas
+devoir changer tous les appels existants) mais n'est plus utilisé dans le texte. Validé sur un
+fichier réel (`2026 09 22 Base article groupement 1.xlsx`) : plus aucun commentaire ne contient
+"[Fournisseur". Les 3 suites de non-régression passent sans changement de total.
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
@@ -1133,3 +1439,12 @@ sans raison identifiée, c'est un signal de régression à investiguer — voir
 > règle n°17 (VRAC) ne touche aucun des 5 fichiers de référence — elle ne concerne que les
 > fichiers IANOR AGAPE (Viandes fraîches, Volailles), donc pas de ligne dans ce tableau pour
 > elle.
+
+> **Mise à jour (2026-11-13)** : règle n°61 (Conditionnement traité à tort comme diviseur/
+> multiplicateur du prix quand Unité de référence = Unité de commande brutes et prix déjà
+> identiques). Seul "MDC_IMPORT_MARCHE" change parmi les 7 fichiers de référence :
+> `audit_general.py` 193/721 → 191/704 ("lignes avec incohérence"/"cellules marquées") ;
+> `audit_general_commentaires.py` 744 → 727 cellules marquées. Les 6 autres fichiers restent
+> strictement identiques. La règle n°62 (même jour, cas "Colis"/PAQUET sur POMONA EPISAVEUR —
+> LOT 7, hors des 7 fichiers de référence) n'a entraîné AUCUN changement de total sur ces 7
+> fichiers.

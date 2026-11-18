@@ -13,6 +13,7 @@ Audite chaque "<i>.xlsx" de <dossier_entree> (déjà au format canonique) avec
 - "_indice.json" : {"produit": N, "categorie": N} (taille de l'indice de prix comparables).
 """
 
+import io
 import json
 import os
 import sys
@@ -20,6 +21,7 @@ import sys
 import openpyxl
 
 import audit_general_commentaires as audit
+import notes_excel
 
 
 def main():
@@ -40,7 +42,11 @@ def main():
 
     for nom, wb_valeurs, wb in zip(noms, classeurs_valeurs, classeurs):
         resultats = audit.audite_classeur(wb_valeurs, wb, indice_prix)
-        wb.save(os.path.join(dossier_sortie, nom))
+        notes_excel.recalcule_toutes_les_notes(wb, audit._dimensions_commentaire)
+        tampon = io.BytesIO()
+        wb.save(tampon)
+        with open(os.path.join(dossier_sortie, nom), "wb") as f:
+            f.write(notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue()))
         resume = [{"nom": r["nom"], "stats": r["stats"], "categories": r["categories"]}
                   for r in resultats]
         with open(os.path.join(dossier_sortie, nom + ".json"), "w", encoding="utf-8") as f:

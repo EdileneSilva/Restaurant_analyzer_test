@@ -30,12 +30,14 @@ sur les 7 fichiers de référence (et les totaux figés dans les tests de non-r�
 fois chaque fichier relu et jugé correct, le déplacer à la main vers pret_pour_audit/.
 """
 
+import io
 import os
 import re
 
 import openpyxl
 from openpyxl.comments import Comment
 
+import notes_excel
 import pretraitement as pt
 import pretraitement_grada as pg
 from causes_format import CauseFormatInvalide
@@ -550,8 +552,19 @@ def _ajoute_commentaires_local(chemin_sortie, lignes):
     wb = openpyxl.load_workbook(chemin_sortie)
     ws = wb.active
     for i, commentaire in a_commenter:
-        ws.cell(row=i + 3, column=pt.COL_LOCAL).comment = Comment(commentaire, "audit_general")
-    wb.save(chemin_sortie)
+        pt._pose_commentaire(ws.cell(row=i + 3, column=pt.COL_LOCAL), commentaire)
+    notes_excel.recalcule_toutes_les_notes(wb, pt._dimensions_commentaire)
+    tampon = io.BytesIO()
+    wb.save(tampon)
+    conteudo = notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue())
+    if hasattr(chemin_sortie, "write"):
+        chemin_sortie.seek(0)
+        chemin_sortie.truncate()
+        chemin_sortie.write(conteudo)
+        chemin_sortie.seek(0)
+    else:
+        with open(chemin_sortie, "wb") as f:
+            f.write(conteudo)
 
 
 def transforme_episaveurs(chemin_source, chemin_sortie):
