@@ -94,9 +94,18 @@ NOM_POLICE = "Calibri"
 TAILLE_POLICE_PT = 9
 _LARGEUR_BULLE_PX = 150
 _CARACTERES_PAR_LIGNE = 33  # 150 px / ~4,5 px par caractère à 9 pt
-_HAUTEUR_BASE_PX = 50
-_HAUTEUR_PAR_LIGNE_PX = 7
-_HAUTEUR_SURCHARGE_PX = 7
+# Hauteur par ligne/de base : la division par ~2 de la règle n°72 (7 px/ligne) s'est avérée
+# insuffisante une fois la largeur corrigée par colonne réelle (règle n°73) — 7 px est bien en
+# dessous de la hauteur minimale d'une ligne de texte à 9 pt (~12-14 px). Avant la règle n°73,
+# la largeur par défaut (trop large pour la plupart des colonnes réelles, plus étroites) rendait
+# la bulle accidentellement plus généreuse, masquant ce manque de hauteur. Revu le 2026-11-18
+# (même jour) sur une base physique : ~14 px/ligne à 9 pt (9 pt × 1,2 d'interligne usuel × 96/72
+# pour convertir en pixels), proche aussi de la mise à l'échelle de la règle n°71 depuis le
+# point de calibration à 11 pt (14 × 9/11 ≈ 11,45). Valeur retenue : 13, à mi-chemin des deux —
+# **1ère tentative, à confirmer visuellement par l'utilisatrice dans Excel (Windows)**.
+_HAUTEUR_BASE_PX = 60
+_HAUTEUR_PAR_LIGNE_PX = 13
+_HAUTEUR_SURCHARGE_PX = 13
 
 
 def dimensions_commentaire(texte):

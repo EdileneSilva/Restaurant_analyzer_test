@@ -1435,6 +1435,37 @@ Docker reconstruit, import vérifié à l'intérieur du conteneur, HTTP 200 vér
 confirmer visuellement par l'utilisatrice dans Excel (Windows), notamment sur les colonnes
 D/E/J/K/M/R qu'elle avait signalées.**
 
+### 74. Règle n°73 a exposé un manque de hauteur déjà présent depuis la règle n°72 (masqué jusque-là par la largeur par défaut, trop généreuse)
+
+Signalé par l'utilisatrice le 2026-11-18 (même jour) : après la règle n°73, "nenhum comentario
+mais longo aparece inteiro" — pire qu'avant, alors que la règle n°73 ne touchait QUE l'ancrage
+horizontal (largeur/colonnes), pas la hauteur. Elle a remis en question l'approche ("porque
+voce esta usando a largura da coluna para decidir a largura do comentario?"), confirmée par
+l'assistant comme la seule façon pour `<x:Anchor>` d'exprimer une largeur en pixels (il ne
+prend que des cellules de début/fin + décalages, pas une largeur directe — voir règle n°69).
+
+En creusant : la largeur EST correcte après la règle n°73 (vérifié : la colonne H, par exemple,
+tient maintenant exactement dans ses 150 px voulus, dans une seule colonne). Le vrai problème
+était la HAUTEUR par ligne (règle n°72 : 7 px/ligne) — beaucoup trop petite pour une ligne de
+texte à 9 pt, qui a besoin d'au moins ~12-14 px. Avant la règle n°73, la largeur par défaut
+(64 px, bien en dessous de la plupart des vraies colonnes) faisait que l'ancre s'étendait sur
+PLUS de colonnes que nécessaire pour couvrir 150 px — rendant la bulle accidentellement plus
+grande que prévu dans les deux sens (largeur ET, par ricochet visuel, l'impression de hauteur
+suffisante). Une fois la largeur corrigée (plus précise, donc moins généreuse), le manque de
+hauteur — déjà présent, mais caché — est devenu visible partout.
+
+Revu sur une base physique plutôt que sur un nouveau découpage par 2 : `_HAUTEUR_PAR_LIGNE_PX`
+7→13 (≈ 9 pt × 1,2 d'interligne usuel × 96/72 pour convertir en pixels ≈ 14, et proche aussi de
+la mise à l'échelle de la règle n°71 depuis le point de calibration à 11 pt, 14×9/11≈11,45 — 13
+est à mi-chemin des deux). `_HAUTEUR_BASE_PX`/`_HAUTEUR_SURCHARGE_PX` 50/7→60/13 dans la même
+proportion. Largeur (150 px) inchangée. **1ère tentative sur cette nouvelle base physique, pas
+encore confirmée visuellement** — contrairement aux deux essais précédents (règles n°71-72),
+basés sur un seul retour qualitatif ("trop petit"/"le double"), celui-ci part d'un calcul de
+hauteur de ligne réel, pour éviter un 3e aller-retour.
+
+Les 3 suites de non-régression passent sans changement de total. Docker reconstruit, HTTP 200
+vérifié.
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
