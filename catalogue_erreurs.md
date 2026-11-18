@@ -1346,12 +1346,16 @@ enveloppe le texte de chaque commentaire déjà sauvegardé dans un run avec `rF
 Taille de bulle recalculée en conséquence dans `notes_excel.dimensions_commentaire()` (nouvelle
 fonction centralisée, dont délèguent maintenant les 3 `_dimensions_commentaire()` locaux de
 `pretraitement.py`, `audit_general.py`, `audit_general_commentaires.py` — plus de triple
-duplication des constantes de taille) : largeur de caractère Calibri ~7 px à 11 pt (constante
-XlsxWriter, voir règle n°69) mise à l'échelle pour 8 pt ≈ 5,1 px/caractère. Proportion ajustée
-une seconde fois le même jour, à la demande de l'utilisatrice (bulle plus étroite et plus haute
-plutôt qu'une réduction uniforme) : largeur 200 px, 39 caractères/ligne, hauteur 75 + 16 px par
-ligne. Ces 4 constantes restent faciles à ajuster si la vérification visuelle dans Excel
-(Windows) en montre le besoin.
+duplication des constantes de taille). Calibration d'abord faite avec la largeur du chiffre
+XlsxWriter pour Calibri (~7 px à 11 pt, voir règle n°69) mise à l'échelle pour 8 pt — puis
+corrigée le même jour quand l'utilisatrice a précisé que l'ANCIENNE bulle (320 px, 58
+caractères/ligne, règle n°60) s'affichait déjà en Calibri 11 : un vrai point de calibration,
+donnant ~320/58 ≈ 5,52 px/caractère à 11 pt (PAS 7, la largeur du chiffre '0' est supérieure à
+la largeur moyenne des lettres d'un texte normal) → mis à l'échelle pour 8 pt ≈ 4,01
+px/caractère. Proportion par ailleurs ajustée le même jour, à la demande de l'utilisatrice
+(bulle plus étroite et plus haute plutôt qu'une réduction uniforme) : largeur 200 px, 50
+caractères/ligne (200 / 4,01), hauteur 75 + 16 px par ligne. Ces 4 constantes restent faciles à
+ajuster si la vérification visuelle dans Excel (Windows) en montre le besoin.
 
 Validé bout en bout avec un fichier réel (`2026 09 22 Base article groupement 1.xlsx`), par le
 même chemin de code que Streamlit : 686 commentaires ont tous `rFont="Calibri"`/`sz="8"` dans
