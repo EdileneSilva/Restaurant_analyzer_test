@@ -203,17 +203,32 @@ def recalcule_toutes_les_notes(wb, dimensionne):
     `corrige_ancrage_apres_sauvegarde()`, seul moyen pour l'ancre Excel desktop de refléter la
     vraie taille des colonnes/lignes du fichier plutôt qu'une taille par défaut uniforme (voir
     règle n°73 de `catalogue_erreurs.md`)."""
+    from openpyxl.utils import column_index_from_string
+
     dimensions_feuilles = {}
     for ws in wb.worksheets:
-        colonnes, lignes = {}, {}
+        a_un_commentaire = False
         for ligne in ws.iter_rows():
             for cel in ligne:
                 if cel.comment:
+                    a_un_commentaire = True
                     cel.comment.width, cel.comment.height = dimensionne(cel.comment.text)
-                    colonnes.setdefault(cel.column, _largeur_colonne_px(ws, cel.column))
-                    lignes.setdefault(cel.row, _hauteur_ligne_px(ws, cel.row))
-        if colonnes or lignes:
-            dimensions_feuilles[ws.title] = {"colonnes": colonnes, "lignes": lignes}
+        if not a_un_commentaire:
+            continue
+        # TOUTES les colonnes/lignes ayant une largeur/hauteur personnalisée dans la feuille —
+        # pas seulement celles qui portent un commentaire. Nécessaire parce que l'ancre d'une
+        # bulle peut devoir "traverser" des colonnes voisines (sans commentaire) pour couvrir
+        # sa largeur voulue ; si une voisine plus large que le défaut (ex: 226 px) n'était pas
+        # connue, l'ancre avançait trop loin et le repli par défaut (règle n°73) sous-estimait
+        # sa largeur, faisant finalement dessiner une bulle bien plus large que prévu par Excel
+        # (qui utilise la largeur RÉELLE des colonnes traversées, pas la supposition de ce
+        # module) — règle n°80 de `catalogue_erreurs.md`.
+        colonnes = {
+            column_index_from_string(lettre): _largeur_colonne_px(ws, column_index_from_string(lettre))
+            for lettre in ws.column_dimensions
+        }
+        lignes = {idx: _hauteur_ligne_px(ws, idx) for idx in ws.row_dimensions}
+        dimensions_feuilles[ws.title] = {"colonnes": colonnes, "lignes": lignes}
     return dimensions_feuilles
 
 
