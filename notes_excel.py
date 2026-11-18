@@ -93,24 +93,71 @@ _RE_TAILLE_STYLE = re.compile(r"width:(\d+)px;height:(\d+)px")
 NOM_POLICE = "Calibri"
 TAILLE_POLICE_PT = 9
 # Largeur : +25% le 2026-11-18 (150 -> 188, règle n°75) jugée encore trop étroite le même jour
-# -> +25% de plus (188 -> 235) — caractères/ligne recalculés dans la même proportion à chaque
-# fois (même ~4,5 px/caractère à 9 pt).
+# -> +25% de plus (188 -> 235, règle n°76).
 _LARGEUR_BULLE_PX = 235
-_CARACTERES_PAR_LIGNE = 51  # 235 px / ~4,5 px par caractère à 9 pt
-# Hauteur par ligne/de base : voir règle n°74 (passée de 7 à 13 px/ligne sur une base physique).
-# +10% le 2026-11-18 (même jour), demande explicite de l'utilisatrice.
+# Marge interne horizontale (texte vs bord de la bulle) et verticale (haut+bas) — padding
+# habituel d'une bulle de commentaire Excel, pas mesuré précisément mais sans grand impact
+# (contrairement à l'ancienne estimation en caractères/ligne, voir plus bas).
+_MARGE_HORIZONTALE_PX = 16
 _HAUTEUR_BASE_PX = 66
-_HAUTEUR_PAR_LIGNE_PX = 14
 _HAUTEUR_SURCHARGE_PX = 14
+
+# Signalé par l'utilisatrice le 2026-11-18 (même jour) : avec une largeur de caractère MOYENNE
+# (règles n°71-76), certaines bulles finissaient trop grandes, d'autres trop petites, sans
+# qu'aucun réglage des constantes ne satisfasse tous les cas — logique, un caractère large
+# ('W') et un caractère étroit ('i') n'occupent pas du tout la même largeur, et le texte réel
+# des commentaires n'a pas une composition de lettres constante d'un cas à l'autre (vérifié :
+# à 9 pt, "iii...i" occupe ~2,75 px/caractère quand "WWW...W" en occupe ~10,67, un rapport de
+# presque 4). Remplacé par une mesure RÉELLE de la largeur du texte avec Pillow, en utilisant
+# Carlito (`fonts-crosextra-carlito`, déjà présent via la dépendance LibreOffice du Dockerfile)
+# — une police libre spécifiquement conçue pour être métriquement identique à Calibri (mêmes
+# largeurs de caractère), donc fiable comme substitut pour calculer le retour à la ligne RÉEL
+# dans Excel, plutôt qu'une moyenne qui ne peut jamais convenir à tous les textes.
+_CHEMIN_POLICE = "/usr/share/fonts/truetype/crosextra/Carlito-Regular.ttf"
+_fonte = None
+
+
+def _police():
+    global _fonte
+    if _fonte is None:
+        from PIL import ImageFont
+        taille_px = round(TAILLE_POLICE_PT * 96 / 72)  # pt -> px à 96 DPI (comme Excel/VML)
+        _fonte = ImageFont.truetype(_CHEMIN_POLICE, taille_px)
+    return _fonte
+
+
+def _nb_lignes_paragraphe(paragraphe, largeur_disponible_px, fonte):
+    """Nombre de lignes réelles qu'occuperait `paragraphe` si on le passait à la ligne comme
+    Excel le ferait (mot par mot), pour une largeur de texte utilisable de
+    `largeur_disponible_px` — un mot plus large à lui seul que `largeur_disponible_px` reste
+    seul sur sa ligne (déborde, comme le ferait Excel)."""
+    if not paragraphe:
+        return 1
+    mots = paragraphe.split(" ")
+    nb_lignes, ligne_courante = 1, ""
+    for mot in mots:
+        candidate = mot if not ligne_courante else f"{ligne_courante} {mot}"
+        if not ligne_courante or fonte.getlength(candidate) <= largeur_disponible_px:
+            ligne_courante = candidate
+        else:
+            nb_lignes += 1
+            ligne_courante = mot
+    return nb_lignes
 
 
 def dimensions_commentaire(texte):
-    """Taille de bulle (largeur, hauteur) adaptée à la longueur du texte, pour la police/taille
-    fixées ci-dessus (`NOM_POLICE`/`TAILLE_POLICE_PT`) — seule source de ces constantes, reprise
-    par les `_dimensions_commentaire()` locaux de `pretraitement.py`, `audit_general.py` et
+    """Taille de bulle (largeur, hauteur) adaptée à la longueur RÉELLE du texte (mesurée avec
+    Carlito, voir plus haut), pour la police/taille fixées ci-dessus (`NOM_POLICE`/
+    `TAILLE_POLICE_PT`) — seule source de ces constantes, reprise par les
+    `_dimensions_commentaire()` locaux de `pretraitement.py`, `audit_general.py` et
     `audit_general_commentaires.py`."""
-    nb_lignes = sum(max(1, -(-len(p) // _CARACTERES_PAR_LIGNE)) for p in texte.split("\n"))
-    hauteur = max(_HAUTEUR_BASE_PX, nb_lignes * _HAUTEUR_PAR_LIGNE_PX + _HAUTEUR_SURCHARGE_PX)
+    fonte = _police()
+    largeur_disponible = _LARGEUR_BULLE_PX - _MARGE_HORIZONTALE_PX
+    nb_lignes = sum(
+        _nb_lignes_paragraphe(p, largeur_disponible, fonte) for p in texte.split("\n"))
+    ascent, descent = fonte.getmetrics()
+    hauteur_ligne = ascent + descent
+    hauteur = max(_HAUTEUR_BASE_PX, nb_lignes * hauteur_ligne + _HAUTEUR_SURCHARGE_PX)
     return _LARGEUR_BULLE_PX, hauteur
 
 

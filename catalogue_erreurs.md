@@ -1488,6 +1488,45 @@ demandé explicitement : `_HAUTEUR_BASE_PX` 60→66, `_HAUTEUR_PAR_LIGNE_PX`/
 Les 3 suites de non-régression passent sans changement de total. Docker reconstruit, HTTP 200
 vérifié.
 
+### 77. Estimation en caractères/ligne (règles n°71-76) remplacée par une mesure réelle de la largeur du texte (Pillow + police Carlito)
+
+Signalé par l'utilisatrice le 2026-11-18 (même jour) : même après plusieurs réglages des
+constantes (règles n°71-76), certaines bulles restaient trop grandes et d'autres trop petites,
+sans qu'aucune valeur unique de "caractères par ligne" ne convienne à tous les commentaires.
+Cause de fond : cette estimation supposait une largeur de caractère MOYENNE, alors qu'un
+caractère large ('W') et un caractère étroit ('i') n'occupent pas du tout la même largeur à
+l'écran — vérifié : à 9 pt, une chaîne de 'i' occupe environ 2,75 px/caractère quand la même
+longueur en 'W' en occupe environ 10,67, un rapport de presque 4. Le texte réel des
+commentaires n'a pas une composition de lettres constante d'un cas à l'autre, donc aucune
+moyenne fixe ne peut convenir à tous.
+
+Remplacé par une mesure RÉELLE de la largeur du texte avec Pillow (`PIL.ImageFont`), en
+simulant le retour à la ligne mot par mot (comme le ferait Excel) plutôt que de diviser le
+nombre de caractères par une constante. Police utilisée pour la mesure : **Carlito**
+(`fonts-crosextra-carlito`), une police libre spécifiquement conçue pour être métriquement
+identique à Calibri (mêmes largeurs de caractère) — fiable comme substitut puisque Calibri
+elle-même n'est pas une police libre disponible sur le serveur. Hauteur de ligne également
+mesurée sur la police (`font.getmetrics()`, ascent + descent) plutôt qu'estimée. Nouvelles
+dépendances : `Pillow` (déjà listé dans `requirements.txt`, juste en dessous de la version max
+compatible avec `streamlit` 1.39.0 : 10.4.0, pas 11+) et `fonts-crosextra-carlito` (ajouté à
+`Dockerfile` et `packages.txt`, déjà disponible normalement via la dépendance LibreOffice mais
+rendu explicite pour ne pas en dépendre implicitement).
+
+`_CARACTERES_PAR_LIGNE` et `_HAUTEUR_PAR_LIGNE_PX` (les deux anciennes constantes basées sur
+une moyenne) supprimés — la largeur/hauteur de bulle (`_LARGEUR_BULLE_PX`, `_MARGE_
+HORIZONTALE_PX`, `_HAUTEUR_BASE_PX`, `_HAUTEUR_SURCHARGE_PX`) restent les seules constantes
+ajustables, désormais indépendantes de la composition du texte.
+
+Validé : rechargé dans un conteneur Docker reconstruit (vérifie que Pillow et Carlito sont bien
+présents dans l'environnement de déploiement, pas seulement en local) — `notes_excel.
+dimensions_commentaire()` fonctionne et renvoie des hauteurs variées et cohérentes sur un
+fichier réel (`BPF - LOT 5`, 52 commentaires : de 66 px pour le plus court à 174 px pour le
+plus long, 7 paliers intermédiaires, chacun basé sur la mesure réelle de SON texte). Les 13
+fichiers Webgerest CD45 passent sans erreur dans les deux moteurs (y compris le moteur
+"commentaires", qui tourne dans un SOUS-PROCESSUS séparé — la police s'y charge aussi
+correctement). Les 3 suites de non-régression passent sans changement de total. Docker
+reconstruit, HTTP 200 vérifié, chargement de la police confirmé à l'intérieur du conteneur.
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
