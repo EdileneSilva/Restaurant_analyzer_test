@@ -1615,6 +1615,37 @@ Docker reconstruit, HTTP 200 vérifié. **Encore à confirmer visuellement, mais
 du "largeur variable" est désormais éliminée — les anciens ajustements de hauteur (règles
 n°78-79) restent valables, cette règle ne corrige que la largeur réellement rendue.**
 
+### 81. Texte encore coupé sur un AUTRE poste Windows (écran différent) — colonnes I et M, largeur réelle pourtant correcte
+
+Signalé par l'utilisatrice le 2026-11-18 (même jour), après avoir ouvert le fichier sur un
+deuxième poste Windows (écran nettement plus grand que le sien, version d'Excel inconnue) :
+texte encore coupé en milieu de phrase sur les colonnes I ("Désignation fournisseur" —
+`COL_DESIG_FOURN`, message "Champ optionnel vide") et M ("Prix de commande" —
+`COL_PRIX_CMD`). Vérifié que ce n'est PAS le bug de la règle n°80 : les deux colonnes ont bien
+une largeur personnalisée explicite dans `LARGEURS_COLONNES` (`pretraitement.py` : I = 30.82
+caractères, M = 13.18), donc correctement lues par le correctif de cette règle.
+
+Cause retenue : ce module mesure le texte avec Carlito (métriquement très proche de Calibri,
+pas identique au pixel près — voir règle n°77) à 96 DPI. Le second poste a un Excel/Windows
+différent et un écran différent (donc peut-être une échelle d'affichage différente) — le rendu
+réel de Calibri y varie forcément un peu, et un mot tout juste à la limite du retour à la
+ligne peut basculer d'un poste à l'autre. Comme il est impossible de garantir un rendu
+identique au pixel près sur *tous* les postes Windows ("imprescindível que funcione em
+qualquer lugar"), une estimation parfaitement exacte sur UN poste ne suffit pas.
+
+Corrigé en ajoutant une marge de sécurité à la largeur utilisée pour SIMULER le retour à la
+ligne (`_MARGE_SECURITE_RETOUR_LIGNE = 0.90`, appliquée uniquement au calcul de
+`dimensions_commentaire()` — la largeur AFFICHÉE de la bulle reste 235 px, inchangée) : chaque
+ligne est considérée pleine 10% avant la vraie limite mesurée, ajoutant une ligne de plus que
+nécessaire dans les cas limites plutôt que de risquer d'en manquer une. Contrepartie acceptée :
+un peu plus d'espace vide dans certains cas, en échange de ne plus jamais couper de texte,
+quel que soit le poste.
+
+Vérifié sur les exemples réels connus : `K163` 70→86 px (+23%), `M107`/`M108` 182/166→198 px.
+Les 3 suites de non-régression passent sans changement de total. Docker reconstruit, HTTP 200
+vérifié. **Encore à confirmer sur le poste qui posait problème — cette marge (0.90) peut être
+resserrée ou élargie si nécessaire.**
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
