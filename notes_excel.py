@@ -95,12 +95,22 @@ TAILLE_POLICE_PT = 9
 # Largeur : +25% le 2026-11-18 (150 -> 188, règle n°75) jugée encore trop étroite le même jour
 # -> +25% de plus (188 -> 235, règle n°76).
 _LARGEUR_BULLE_PX = 235
-# Marge interne horizontale (texte vs bord de la bulle) et verticale (haut+bas) — padding
-# habituel d'une bulle de commentaire Excel, pas mesuré précisément mais sans grand impact
-# (contrairement à l'ancienne estimation en caractères/ligne, voir plus bas).
+# Marge interne horizontale (texte vs bord de la bulle) — padding habituel d'une bulle de
+# commentaire Excel, pas mesuré précisément mais sans grand impact (contrairement à l'ancienne
+# estimation en caractères/ligne, voir plus bas).
 _MARGE_HORIZONTALE_PX = 16
-_HAUTEUR_BASE_PX = 66
-_HAUTEUR_SURCHARGE_PX = 14
+# Hauteur : `_HAUTEUR_SURCHARGE_PX` (une marge FIXE ajoutée à chaque bulle, peu importe sa
+# longueur) et `_HAUTEUR_BASE_PX` (le plancher) pesaient disproportionnellement sur les
+# commentaires COURTS — signalé le 2026-11-18 (même jour) via un exemple réel précis
+# (`BPF - LOT 5`, K163, 4 lignes : ~1/3 d'espace en trop) : la marge fixe de 14 px, qui pèse
+# peu sur un long commentaire, en représente une bien plus grande part sur un commentaire à
+# quelques lignes seulement — probablement en plus d'un padding déjà propre à Excel.
+# `_FACTEUR_HAUTEUR_LIGNE` réduit aussi légèrement la hauteur de ligne mesurée (ascent+descent)
+# elle-même, qui s'est avérée un peu généreuse : 4 lignes à 78 px (16 px/ligne + 14 de marge)
+# deviennent 4×13=52 px (-33%, exactement la proportion rapportée pour K163).
+_FACTEUR_HAUTEUR_LIGNE = 0.8125
+_HAUTEUR_BASE_PX = 26
+_HAUTEUR_SURCHARGE_PX = 0
 
 # Signalé par l'utilisatrice le 2026-11-18 (même jour) : avec une largeur de caractère MOYENNE
 # (règles n°71-76), certaines bulles finissaient trop grandes, d'autres trop petites, sans
@@ -156,8 +166,8 @@ def dimensions_commentaire(texte):
     nb_lignes = sum(
         _nb_lignes_paragraphe(p, largeur_disponible, fonte) for p in texte.split("\n"))
     ascent, descent = fonte.getmetrics()
-    hauteur_ligne = ascent + descent
-    hauteur = max(_HAUTEUR_BASE_PX, nb_lignes * hauteur_ligne + _HAUTEUR_SURCHARGE_PX)
+    hauteur_ligne = (ascent + descent) * _FACTEUR_HAUTEUR_LIGNE
+    hauteur = max(_HAUTEUR_BASE_PX, round(nb_lignes * hauteur_ligne + _HAUTEUR_SURCHARGE_PX))
     return _LARGEUR_BULLE_PX, hauteur
 
 
