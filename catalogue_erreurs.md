@@ -1578,6 +1578,43 @@ prudent que les -33% précédents, qui coupaient le texte), `M107`/`M108` 190/17
 changement de total. Docker reconstruit, HTTP 200 vérifié. **Encore à confirmer visuellement —
 priorité donnée à l'absence de troncature plutôt qu'à la compacité maximale.**
 
+### 80. Vraie cause de l'excès d'espace (E/M/R) : `<x:Anchor>` ignorait la largeur réelle des colonnes VOISINES (pas seulement la colonne du commentaire)
+
+Signalé par l'utilisatrice le 2026-11-18 (même jour), après vérification détaillée colonne par
+colonne avec un comptage précis des lignes : "les corrigées (D/H/J/K/L) sont parfaites, mais
+les autres (E/M/R) sont devenues plus grandes dans TOUS les cas" — avec des proportions vides
+très variables (E : moitié vide pour 2 lignes écrites ; M vert : 3-4 lignes vides sur 7 ; R :
+autant de vide que de texte). Elle-même a suggéré la bonne piste : "plus les notes sont
+larges, plus l'erreur d'espace est grande" — et cette largeur variait beaucoup d'une bulle à
+l'autre alors que `_LARGEUR_BULLE_PX` est une CONSTANTE unique (235 px) censée être identique
+partout.
+
+Cause confirmée : la règle n°73 ne mémorisait la largeur RÉELLE d'une colonne que si elle-même
+portait un commentaire (`colonnes.setdefault(cel.column, ...)`, construit en itérant les
+cellules COMMENTÉES). Pour les colonnes voisines (sans commentaire) que l'ancre doit parfois
+"traverser" pour couvrir ses 235 px, le calcul retombait sur la largeur par défaut d'Excel
+(64 px) — très en dessous de la plupart des colonnes réelles. Résultat : le calcul avançait
+trop vite à travers des colonnes supposées étroites, débordant plus loin que nécessaire ; or
+Excel rend l'ancre avec la largeur RÉELLE des colonnes traversées (pas la supposition de ce
+module), donc la bulle finissait bien plus large que prévu. Vérifié précisément sur `R4`
+(`BPF - LOT 5`) : l'ancien calcul donnait une bulle réellement large de **404 px** pour une
+largeur voulue de 235 px (+72%). Comme Excel reflue le texte selon la largeur RÉELLE de la
+bulle (pas les 235 px supposés au moment de calculer la hauteur), le même texte tient alors en
+moins de lignes que prévu — d'où l'espace vide en bas, proportionnel à l'écart de largeur :
+exactement le gradient rapporté (R, le plus large en trop, le plus vide ; H, déjà large par
+elle-même donc débordant peu sur ses voisines, presque pas affectée).
+
+Corrigé en mémorisant la largeur RÉELLE de **toutes** les colonnes ayant une largeur
+personnalisée dans la feuille (`ws.column_dimensions`, qu'elles portent un commentaire ou non)
+— pas seulement celles portant un commentaire — et de même pour les hauteurs de ligne
+(`ws.row_dimensions`). Vérifié sur `BPF - LOT 5` : `R4`, `E11`, `M107`, `M108`, `K163`, `H11`
+rendent maintenant TOUS exactement 235 px de large (recalculé avec les largeurs réelles des
+colonnes traversées) — plus aucun écart. Les 3 suites de non-régression passent sans
+changement de total. Les 13 fichiers Webgerest CD45 passent sans erreur dans les deux moteurs.
+Docker reconstruit, HTTP 200 vérifié. **Encore à confirmer visuellement, mais la cause de fond
+du "largeur variable" est désormais éliminée — les anciens ajustements de hauteur (règles
+n°78-79) restent valables, cette règle ne corrige que la largeur réellement rendue.**
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
