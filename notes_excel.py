@@ -114,6 +114,20 @@ _FACTEUR_HAUTEUR_LIGNE = 1.0
 _HAUTEUR_SURCHARGE_PX = 6
 _HAUTEUR_BASE_PX = 26
 
+# Signalé par l'utilisatrice le 2026-11-18 (même jour) : certains commentaires restent coupés
+# sur un AUTRE poste Windows (colonnes I et M, confirmées en largeur réelle correcte — pas le
+# bug de la règle n°80), avec un écran différent du sien (plus grand, donc potentiellement une
+# échelle/DPI Windows différente). Carlito (utilisé ici pour mesurer) n'est que métriquement
+# TRÈS proche de Calibri, pas identique au pixel près, et le rendu réel varie aussi avec la
+# police/le DPI exacts de chaque poste — un mot tout juste à la limite du retour à la ligne
+# peut basculer d'une machine à l'autre. Comme ça ne peut jamais être garanti identique partout
+# ("imprescindível que funcione em qualquer lugar"), une marge de sécurité est appliquée à la
+# largeur utilisée pour SIMULER le retour à la ligne (pas à la largeur affichée de la bulle,
+# qui reste 235 px) : chaque ligne est considérée pleine un peu avant la vraie limite, ce qui
+# ajoute une ligne de plus que nécessaire dans les cas limites plutôt que de risquer d'en
+# manquer une.
+_MARGE_SECURITE_RETOUR_LIGNE = 0.90
+
 # Signalé par l'utilisatrice le 2026-11-18 (même jour) : avec une largeur de caractère MOYENNE
 # (règles n°71-76), certaines bulles finissaient trop grandes, d'autres trop petites, sans
 # qu'aucun réglage des constantes ne satisfasse tous les cas — logique, un caractère large
@@ -164,7 +178,7 @@ def dimensions_commentaire(texte):
     `_dimensions_commentaire()` locaux de `pretraitement.py`, `audit_general.py` et
     `audit_general_commentaires.py`."""
     fonte = _police()
-    largeur_disponible = _LARGEUR_BULLE_PX - _MARGE_HORIZONTALE_PX
+    largeur_disponible = (_LARGEUR_BULLE_PX - _MARGE_HORIZONTALE_PX) * _MARGE_SECURITE_RETOUR_LIGNE
     nb_lignes = sum(
         _nb_lignes_paragraphe(p, largeur_disponible, fonte) for p in texte.split("\n"))
     ascent, descent = fonte.getmetrics()
