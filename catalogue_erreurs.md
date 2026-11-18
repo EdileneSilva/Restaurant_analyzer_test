@@ -1330,35 +1330,38 @@ devoir changer tous les appels existants) mais n'est plus utilisé dans le texte
 fichier réel (`2026 09 22 Base article groupement 1.xlsx`) : plus aucun commentaire ne contient
 "[Fournisseur". Les 3 suites de non-régression passent sans changement de total.
 
-### 71. Police des commentaires fixée (Calibri 8) et bulle recalculée en conséquence
+### 71. Police des commentaires fixée (Calibri, 8 puis 9 pt) et bulle recalculée en conséquence, hauteur proportionnelle au texte
 
 Demandé par l'utilisatrice le 2026-11-18, après la règle n°69 : plutôt que de dépendre du
 réglage "police des commentaires" de l'Excel de qui ouvre le fichier (variable d'un poste à
 l'autre — important puisqu'elle teste en parallèle sur un PC Windows), fixer la police à
-Calibri 8 pt pour tout le monde, et recalculer la taille de bulle pour cette police (plus
-compacte qu'avec la police par défaut, plus grande utilisée jusque-là). openpyxl n'offre aucune
-API pour écrire la police d'un commentaire (`Comment` n'écrit jamais de run enrichi `<r><rPr>`
-dans `xl/comments/*.xml`, seulement un `<t>` nu) : ajouté à `notes_excel.py`
+Calibri pour tout le monde, et recalculer la taille de bulle pour cette police (plus compacte
+qu'avec la police par défaut, plus grande, utilisée jusque-là). openpyxl n'offre aucune API
+pour écrire la police d'un commentaire (`Comment` n'écrit jamais de run enrichi `<r><rPr>` dans
+`xl/comments/*.xml`, seulement un `<t>` nu) : ajouté à `notes_excel.py`
 (`_applique_police_comments_xml()`, appelé par `corrige_ancrage_apres_sauvegarde()`), qui
 enveloppe le texte de chaque commentaire déjà sauvegardé dans un run avec `rFont="Calibri"`/
-`sz="8"`.
+`sz` fixé.
 
 Taille de bulle recalculée en conséquence dans `notes_excel.dimensions_commentaire()` (nouvelle
 fonction centralisée, dont délèguent maintenant les 3 `_dimensions_commentaire()` locaux de
 `pretraitement.py`, `audit_general.py`, `audit_general_commentaires.py` — plus de triple
-duplication des constantes de taille). Calibration d'abord faite avec la largeur du chiffre
-XlsxWriter pour Calibri (~7 px à 11 pt, voir règle n°69) mise à l'échelle pour 8 pt — puis
-corrigée le même jour quand l'utilisatrice a précisé que l'ANCIENNE bulle (320 px, 58
-caractères/ligne, règle n°60) s'affichait déjà en Calibri 11 : un vrai point de calibration,
-donnant ~320/58 ≈ 5,52 px/caractère à 11 pt (PAS 7, la largeur du chiffre '0' est supérieure à
-la largeur moyenne des lettres d'un texte normal) → mis à l'échelle pour 8 pt ≈ 4,01
-px/caractère. Proportion par ailleurs ajustée le même jour, à la demande de l'utilisatrice
-(bulle plus étroite et plus haute plutôt qu'une réduction uniforme) : largeur 200 px, 50
-caractères/ligne (200 / 4,01), hauteur 75 + 16 px par ligne. Ces 4 constantes restent faciles à
-ajuster si la vérification visuelle dans Excel (Windows) en montre le besoin.
+duplication des constantes de taille). Calibration basée sur un point réel : l'utilisatrice a
+confirmé que l'ANCIENNE bulle (320 px, 58 caractères/ligne, règle n°60) s'affichait en Calibri
+11 → ~320/58 ≈ 5,52 px/caractère à 11 pt (PAS la largeur du chiffre XlsxWriter, ~7px à 11pt :
+plus large que la moyenne des lettres d'un texte normal). Essayé d'abord à 8 pt (~4,01
+px/caractère) le même jour, mais jugé trop petit à l'usage une fois testé dans Excel : repassé
+à 9 pt (~4,52 px/caractère) toujours le 2026-11-18. Proportion de la bulle ajustée à la demande
+explicite de l'utilisatrice : plus étroite et plus haute que l'originale, largeur FIXE (200 px,
+44 caractères/ligne à 9 pt) — seule la hauteur varie selon la longueur du texte (75→84 de base,
+16→18 px par ligne de texte estimée, à 8→9 pt). Validé sur un fichier réel (686 commentaires) :
+hauteur variant de 84 px (commentaire de 35 caractères) à 396 px (commentaire de 902
+caractères), en passant par 12 paliers intermédiaires — bien proportionnelle, pas une taille
+unique. Ces constantes restent faciles à réajuster si une nouvelle vérification visuelle dans
+Excel (Windows) en montre le besoin.
 
 Validé bout en bout avec un fichier réel (`2026 09 22 Base article groupement 1.xlsx`), par le
-même chemin de code que Streamlit : 686 commentaires ont tous `rFont="Calibri"`/`sz="8"` dans
+même chemin de code que Streamlit : 686 commentaires ont tous `rFont="Calibri"`/`sz="9"` dans
 `xl/comments/comment1.xml` ET `<x:Anchor>` dans la VML, le fichier se rouvre sans erreur dans
 openpyxl. Les 13 fichiers réels Webgerest CD45 passent sans erreur dans les deux moteurs. Les 3
 suites de non-régression passent sans changement de total (aucune de ces tests n'appelle le
