@@ -68,33 +68,37 @@ _DECALAGE_Y_DEFAUT_PX = 10
 _RE_TAILLE_STYLE = re.compile(r"width:(\d+)px;height:(\d+)px")
 
 # Police fixe des commentaires — demandé par l'utilisatrice le 2026-11-18 (au lieu du réglage
-# par défaut d'Excel, variable d'un poste à l'autre). Taille de bulle recalculée pour cette
-# police/taille à partir d'un point de calibration réel, pas d'une estimation générique :
-# l'utilisatrice a confirmé que l'ANCIENNE bulle (320 px, 58 caractères/ligne, voir règle n°60)
-# s'affichait jusque-là en Calibri 11 — donc ~320/58 ≈ 5,52 px/caractère à 11 pt (PAS 7
-# px/caractère, la largeur du chiffre '0' utilisée ailleurs dans ce module pour l'ancrage Excel
-# desktop — les lettres d'un texte normal sont en moyenne plus étroites qu'un chiffre). 8 pt
-# s'est avéré trop petit à l'usage ; repassé à 9 pt le 2026-11-18 (même jour), toujours avec la
-# bulle plus étroite et plus haute que l'originale (demande du même jour) mais SANS largeur
-# variable par commentaire (demande explicite : largeur fixe, seule la hauteur doit varier
-# selon la longueur du texte — déjà le cas, voir dimensions_commentaire() plus bas). Mis à
-# l'échelle pour 9 pt : ~5,52 × 9/11 ≈ 4,52 px/caractère ; hauteur mise à l'échelle depuis les
-# valeurs choisies à 8 pt (75 base / 16 par ligne) dans le même rapport 9/8.
+# par défaut d'Excel, variable d'un poste à l'autre). 8 pt jugé trop petit à l'usage, repassé à
+# 9 pt le même jour (confirmé bon). Largeur FIXE, seule la hauteur varie selon la longueur du
+# texte (demande explicite : voir dimensions_commentaire() plus bas).
+#
+# Taille de bulle : calibration revue une 2e fois le 2026-11-18 (même jour), l'utilisatrice
+# ayant signalé dans Excel (PC Windows) que la hauteur était partout "au moins le double" de
+# ce qu'il faudrait (exemple réel vérifié : `BPF - LOT 5`, ligne 11, commentaire de 337
+# caractères — bulle à 162 px alors qu'il en faudrait ~81) — alors que la 1ère calibration
+# (320 px / 58 caractères à 11 pt, confirmée correcte à l'époque pour l'ANCIENNE bulle, bien
+# plus grande) donnait, mise à l'échelle pour 9 pt, une hauteur par ligne proche de celle
+# utilisée ici. Les 2 constantes de hauteur sont donc désormais calées sur ce retour direct
+# (division par ~2) plutôt que sur la mise à l'échelle théorique, qui s'est avérée insuffisante
+# une fois testée dans le vrai Excel. Largeur réduite à 150 px (demande explicite), caractères/
+# ligne recalculés pour la même largeur de caractère qu'avant (~4,5 px/caractère à 9 pt) —
+# seule la hauteur était en cause, pas la largeur de caractère.
 NOM_POLICE = "Calibri"
 TAILLE_POLICE_PT = 9
-_LARGEUR_BULLE_PX = 200
-_CARACTERES_PAR_LIGNE = 44  # 200 px / ~4,52 px par caractère à 9 pt
-_HAUTEUR_BASE_PX = 84
-_HAUTEUR_PAR_LIGNE_PX = 18
+_LARGEUR_BULLE_PX = 150
+_CARACTERES_PAR_LIGNE = 33  # 150 px / ~4,5 px par caractère à 9 pt
+_HAUTEUR_BASE_PX = 50
+_HAUTEUR_PAR_LIGNE_PX = 7
+_HAUTEUR_SURCHARGE_PX = 7
 
 
 def dimensions_commentaire(texte):
     """Taille de bulle (largeur, hauteur) adaptée à la longueur du texte, pour la police/taille
-    fixées ci-dessus (`NOM_POLICE`/`TAILLE_POLICE_PT`) — seule source de ces 4 constantes,
-    reprise par les `_dimensions_commentaire()` locaux de `pretraitement.py`,
-    `audit_general.py` et `audit_general_commentaires.py`."""
+    fixées ci-dessus (`NOM_POLICE`/`TAILLE_POLICE_PT`) — seule source de ces constantes, reprise
+    par les `_dimensions_commentaire()` locaux de `pretraitement.py`, `audit_general.py` et
+    `audit_general_commentaires.py`."""
     nb_lignes = sum(max(1, -(-len(p) // _CARACTERES_PAR_LIGNE)) for p in texte.split("\n"))
-    hauteur = max(_HAUTEUR_BASE_PX, nb_lignes * _HAUTEUR_PAR_LIGNE_PX + 18)
+    hauteur = max(_HAUTEUR_BASE_PX, nb_lignes * _HAUTEUR_PAR_LIGNE_PX + _HAUTEUR_SURCHARGE_PX)
     return _LARGEUR_BULLE_PX, hauteur
 
 

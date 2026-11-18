@@ -1368,6 +1368,32 @@ suites de non-régression passent sans changement de total (aucune de ces tests 
 chemin de sauvegarde finale où `notes_excel` intervient — la police/taille de bulle n'influence
 de toute façon aucune décision de couleur/colonne).
 
+### 72. Bulle de commentaire encore trop haute une fois testée dans Excel (règle n°71) : calibration théorique remplacée par un retour direct
+
+Signalé par l'utilisatrice le 2026-11-18 (même jour que la règle n°71), après test réel dans
+Excel sur PC Windows : la hauteur de bulle était "au moins le double" de ce qu'il faudrait,
+partout — exemple vérifié sur `BPF - LOT 5 - BPU DQE - BEURRE OVOPRODUIT FROMAGE.xlsx`, ligne
+11, commentaire de 337 caractères ("Le conditionnement ('6x1L')...") : bulle à 162 px de haut
+alors qu'il en fallait environ la moitié. La mise à l'échelle théorique de la règle n°71 (à
+partir du point de calibration 320 px/58 caractères à 11 pt) s'est donc avérée insuffisante une
+fois réellement affichée dans Excel desktop — contrairement à la taille de bulle elle-même
+(largeur/`<x:Anchor>`, règle n°69), qui elle était correcte, seule la hauteur par ligne
+estimée était trop généreuse.
+
+Plutôt que de retenter une nouvelle mise à l'échelle théorique (qui a déjà raté deux fois : 8pt
+puis 9pt), les constantes de hauteur ont été recalées directement sur ce retour chiffré (grosso
+modo divisées par 2) : `_HAUTEUR_BASE_PX` 84→50, `_HAUTEUR_PAR_LIGNE_PX`/`_HAUTEUR_SURCHARGE_PX`
+18→7. Largeur réduite à 150 px (demande explicite, supplémentaire à la correction de hauteur) ;
+caractères/ligne recalculés pour la même largeur de caractère qu'avant (33, pour 150 px à ~4,5
+px/caractère — cette partie n'avait pas été signalée comme fausse, seule la hauteur l'était).
+
+Vérifié sur les 3 exemples réels déjà connus (règle n°71) : 337 caractères passe de 162 à 84 px
+(÷1,93), 902 caractères passe de 396 à 203 px (÷1,95), 35 caractères passe de 84 à 50 px (÷1,68,
+plus proche du plancher) — cohérent avec le "au moins le double" rapporté. Les 3 suites de
+non-régression passent sans changement de total. Docker reconstruit, HTTP 200 vérifié. **Encore
+à confirmer visuellement par l'utilisatrice dans Excel (Windows)** — ces constantes restent
+faciles à ajuster une nouvelle fois si besoin.
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
