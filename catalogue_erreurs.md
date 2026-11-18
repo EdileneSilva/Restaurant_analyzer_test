@@ -1527,6 +1527,33 @@ fichiers Webgerest CD45 passent sans erreur dans les deux moteurs (y compris le 
 correctement). Les 3 suites de non-régression passent sans changement de total. Docker
 reconstruit, HTTP 200 vérifié, chargement de la police confirmé à l'intérieur du conteneur.
 
+### 78. Marge fixe (règle n°77) pesant disproportionnellement sur les commentaires courts/moyens
+
+Signalé par l'utilisatrice le 2026-11-18 (même jour), après la règle n°77 : "tous couberam"
+(plus de texte coupé), mais certaines bulles restaient visiblement plus grandes que le texte
+ne le justifiait — colonne R (bulle à moitié vide), cellules M107/M108 (environ 1/3 vide),
+ligne 163 colonne K (environ 1/3 en trop), alors qu'un long commentaire de la colonne H ne
+débordait que peu. Exemple vérifié : `K163` (`BPF - LOT 5`), 4 lignes mesurées comme déjà
+remplies à 93-99% de la largeur disponible (pas un problème de retour à la ligne) — donc la
+cause n'était pas la largeur, mais la hauteur : `_HAUTEUR_SURCHARGE_PX` (14 px) était une marge
+FIXE ajoutée à CHAQUE bulle quelle que soit sa longueur. Sur un commentaire à 1-2 lignes, 14 px
+représente une grande partie de la hauteur totale ; sur un commentaire à 10+ lignes, une part
+négligeable — exactement le gradient rapporté (R et le court commentaire de H les plus vides,
+le long commentaire de H presque pas affecté).
+
+Corrigé en supprimant cette marge fixe (`_HAUTEUR_SURCHARGE_PX` 14→0) et en réduisant un peu la
+hauteur de ligne mesurée elle-même (`_FACTEUR_HAUTEUR_LIGNE = 0.8125` appliqué à ascent+descent
+— un peu généreuse, elle aussi, par rapport au retour direct). Plancher (`_HAUTEUR_BASE_PX`)
+réduit de 66 à 26 px (juste au-dessus d'une seule ligne), pour la même raison que la règle
+n°78 vise : un plancher trop haut pèse disproportionnellement sur les commentaires courts.
+
+Vérifié sur l'exemple exact rapporté : `K163` passe de 78 à 52 px (-33%, exactement la
+proportion signalée). `M107`/`M108` passent de 190/174 à 143/130 px (-25%, dans le même sens,
+même si la règle n°77 n'avait pas listé ces chiffres précis — à confirmer si -25% suffit ou
+s'il faut encore ajuster). Un commentaire court d'une ligne passe de 66 à 26 px. Les 3 suites
+de non-régression passent sans changement de total. Docker reconstruit, HTTP 200 vérifié.
+**Encore à confirmer visuellement — ces 3 constantes restent faciles à réajuster.**
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
