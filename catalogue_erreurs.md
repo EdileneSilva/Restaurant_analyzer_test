@@ -1394,6 +1394,47 @@ non-régression passent sans changement de total. Docker reconstruit, HTTP 200 v
 à confirmer visuellement par l'utilisatrice dans Excel (Windows)** — ces constantes restent
 faciles à ajuster une nouvelle fois si besoin.
 
+### 73. `<x:Anchor>` (règle n°69) toujours calculé avec des largeurs de colonnes PAR DÉFAUT, fausses pour la plupart des colonnes réelles
+
+Signalé par l'utilisatrice le 2026-11-18 (même jour que les règles n°71-72), après un nouveau
+test dans Excel (Windows) : plusieurs colonnes importantes (D, E, J, K, M, R — K et M étant les
+colonnes de PRIX) n'avaient apparemment aucun changement de taille de bulle, et le texte des
+commentaires n'y apparaissait pas en entier ; à l'inverse, en colonne H, une bulle de
+commentaire court apparaissait anormalement LARGE. Contrairement à ce qu'affirmait (à tort) la
+règle n°72, l'ancrage `<x:Anchor>` n'était PAS correct dans tous les cas : il utilisait des
+largeurs de colonne/hauteurs de ligne PAR DÉFAUT uniformes (64 px / 8.43 caractères, 20 px / 15
+pt) pour calculer combien de colonnes/lignes l'ancre devait couvrir — alors que les vraies
+colonnes d'un fichier canonique varient énormément (vérifié sur `BPF - LOT 5` : H fait ~31.8
+caractères de large, presque 4× le défaut, quand D/E/J/K/L/M/R vont de ~11.8 à ~15.3
+caractères). Pour H (bien plus large que supposé), l'ancre calculait qu'il fallait s'étendre
+sur PLUSIEURS colonnes pour couvrir 150 px, alors qu'une seule suffisait en réalité — d'où une
+bulle bien plus large que prévu. Pour les autres colonnes (plus étroites que H mais toujours
+différentes du défaut), le nombre de colonnes réellement couvertes était simplement faux dans
+l'autre sens, d'où l'impression d'absence de changement et de texte tronqué.
+
+Corrigé en lisant les largeurs/hauteurs RÉELLES du classeur au lieu de valeurs par défaut :
+`recalcule_toutes_les_notes()` (seul endroit qui a encore accès à l'objet `Workbook` avant sa
+sauvegarde finale) calcule désormais, par feuille, la largeur réelle de chaque colonne
+commentée (`ws.column_dimensions`, sinon la largeur par défaut de la feuille, sinon le défaut
+Excel — même formule que XlsxWriter) et la hauteur réelle de chaque ligne commentée, et les
+renvoie à l'appelant. `corrige_ancrage_apres_sauvegarde()` reçoit maintenant ce résultat en 2e
+paramètre et l'utilise pour chaque bulle — en identifiant d'abord à quelle FEUILLE appartient
+chaque `xl/drawings/*.vml` (nouvelle fonction `_vml_par_feuille()`, qui suit la chaîne de
+relations OOXML `workbook.xml` → `workbook.xml.rels` → `sheetN.xml` → `sheetN.xml.rels`, le
+seul moyen fiable — la numérotation des fichiers ne correspond pas forcément à l'ordre des
+feuilles si certaines n'ont pas de commentaire). Les 7 points d'appel du pipeline mis à jour
+pour transmettre ce résultat.
+
+Validé sur `BPF - LOT 5` : les ancres de D/H/J/K/L/M/R couvrent maintenant un nombre de
+colonnes différent et cohérent avec leur vraie largeur (H reste sur une seule colonne, les
+autres s'étendent de 1 à 2 colonnes selon leur largeur réelle — plus jamais la même valeur
+uniforme pour toutes). Les 13 fichiers réels Webgerest CD45 et les 7 fichiers de
+`pret_pour_audit/` repassent sans erreur dans les deux moteurs (fichiers audités re-ouverts
+sans erreur dans openpyxl). Les 3 suites de non-régression passent sans changement de total.
+Docker reconstruit, import vérifié à l'intérieur du conteneur, HTTP 200 vérifié. **Encore à
+confirmer visuellement par l'utilisatrice dans Excel (Windows), notamment sur les colonnes
+D/E/J/K/M/R qu'elle avait signalées.**
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du

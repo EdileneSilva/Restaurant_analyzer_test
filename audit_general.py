@@ -4331,11 +4331,11 @@ def main():
                 f.write(resultat["rapport"])
 
         chemin_sortie = os.path.join(DOSSIER_SORTIE, f"{nom_base} - audit.xlsx")
-        notes_excel.recalcule_toutes_les_notes(wb, _dimensions_commentaire)
+        dimensions_feuilles = notes_excel.recalcule_toutes_les_notes(wb, _dimensions_commentaire)
         tampon = io.BytesIO()
         wb.save(tampon)
         with open(chemin_sortie, "wb") as f:
-            f.write(notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue()))
+            f.write(notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue(), dimensions_feuilles))
         print(f"  Fichier enregistré : {chemin_sortie}")
 
     print("\nTerminé. Aucun prix ni unité n'a été modifié dans les fichiers sources — seules "

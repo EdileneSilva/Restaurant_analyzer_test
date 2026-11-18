@@ -18,13 +18,20 @@ ancrage Excel desktop, et police.
    MoveWithCells, SizeWithCells, AutoFill, Row, Column sont écrits) — faute de lui, Excel
    desktop retombe sur une taille par défaut quel que soit le style demandé.
    `corrige_ancrage_apres_sauvegarde()` relit le .xlsx déjà sauvegardé et injecte un `<x:Anchor>`
-   calculé pour chaque bulle, avec la même formule (largeur de colonne / hauteur de ligne PAR
-   DÉFAUT d'Excel, en pixels) que la bibliothèque XlsxWriter utilise pour ses propres bulles de
-   commentaire (`xlsxwriter/worksheet.py`, `_position_object_pixels`/`_comment_vertices` ;
-   `xlsxwriter/vml.py`, `_write_anchor`) — approximatif si le fichier a des largeurs de colonne
-   personnalisées (non prises en compte ici, pour rester simple), mais largement suffisant pour
-   que le texte ne soit plus coupé, contre une bulle fixe quelle que soit la taille demandée
-   actuellement.
+   calculé pour chaque bulle, avec la même formule (largeur de colonne / hauteur de ligne, en
+   pixels) que la bibliothèque XlsxWriter utilise pour ses propres bulles de commentaire
+   (`xlsxwriter/worksheet.py`, `_position_object_pixels`/`_comment_vertices` ;
+   `xlsxwriter/vml.py`, `_write_anchor`). Essayé d'abord avec des largeurs de colonne/hauteurs
+   de ligne PAR DÉFAUT uniformes (pour rester simple) — signalé par l'utilisatrice le
+   2026-11-18 comme insuffisant : plusieurs colonnes réelles (ex. D/E/J/K/M/R du format
+   canonique) ont des largeurs très différentes du défaut Excel (8.43 caractères), donc le
+   nombre de colonnes réellement couvertes par l'ancre était faux, rendant la bulle bien plus
+   grande ou plus petite que prévu selon la colonne. Corrigé en lisant les largeurs/hauteurs
+   RÉELLES du classeur (`ws.column_dimensions`/`ws.row_dimensions`, sinon la valeur par défaut
+   de la feuille, sinon le défaut Excel) au moment de `recalcule_toutes_les_notes()` (le seul
+   endroit qui a encore accès à l'objet `Workbook` avant sa sauvegarde finale), puis en les
+   passant à `corrige_ancrage_apres_sauvegarde()` pour que l'ancre de chaque bulle utilise les
+   vraies dimensions de SA feuille.
 
 3. openpyxl n'offre aucun moyen de choisir la police du TEXTE d'un commentaire (`Comment`
    n'écrit jamais de run enrichi `<r><rPr>...` dans `xl/comments/*.xml`, seulement un `<t>` nu
@@ -38,10 +45,10 @@ Utilisation (dans le script qui sauvegarde le classeur en dernier) :
 
     import notes_excel
 
-    notes_excel.recalcule_toutes_les_notes(wb, _dimensions_commentaire)
+    dimensions_feuilles = notes_excel.recalcule_toutes_les_notes(wb, _dimensions_commentaire)
     tampon = io.BytesIO()
     wb.save(tampon)
-    contenu = notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue())
+    contenu = notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue(), dimensions_feuilles)
 """
 
 import io
@@ -102,38 +109,78 @@ def dimensions_commentaire(texte):
     return _LARGEUR_BULLE_PX, hauteur
 
 
+def _largeur_colonne_px(ws, col_idx):
+    """Largeur réelle (en pixels) de la colonne `col_idx` (1-indexée) de `ws` — largeur propre
+    à la colonne si définie, sinon celle par défaut de la feuille, sinon le défaut Excel
+    (8.43 caractères). Même formule que XlsxWriter (`_size_col`)."""
+    from openpyxl.utils import get_column_letter
+    dim = ws.column_dimensions.get(get_column_letter(col_idx))
+    largeur = dim.width if dim and dim.width else (ws.sheet_format.defaultColWidth or 8.43)
+    if largeur < 1:
+        return int(largeur * 12 + 0.5)
+    return int(largeur * 7 + 0.5) + 5
+
+
+def _hauteur_ligne_px(ws, row_idx):
+    """Hauteur réelle (en pixels) de la ligne `row_idx` (1-indexée) de `ws` — même logique que
+    `_largeur_colonne_px`, pour les lignes."""
+    dim = ws.row_dimensions.get(row_idx)
+    hauteur_pt = dim.height if dim and dim.height else (ws.sheet_format.defaultRowHeight or 15)
+    return int(4.0 / 3.0 * hauteur_pt)
+
+
 def recalcule_toutes_les_notes(wb, dimensionne):
     """`dimensionne(texte) -> (largeur, hauteur)` : la fonction `_dimensions_commentaire` déjà
     utilisée par l'appelant. Passe sur TOUTES les cellules commentées du classeur, pas
     seulement celles que le script courant vient de poser/modifier — nécessaire parce
     qu'openpyxl ne conserve pas width/height d'un commentaire au rechargement (voir docstring
-    du module)."""
+    du module). Renvoie aussi, par nom de feuille, les largeurs de colonnes et hauteurs de
+    lignes réellement utilisées par ses commentaires — à passer tel quel à
+    `corrige_ancrage_apres_sauvegarde()`, seul moyen pour l'ancre Excel desktop de refléter la
+    vraie taille des colonnes/lignes du fichier plutôt qu'une taille par défaut uniforme (voir
+    règle n°73 de `catalogue_erreurs.md`)."""
+    dimensions_feuilles = {}
     for ws in wb.worksheets:
+        colonnes, lignes = {}, {}
         for ligne in ws.iter_rows():
             for cel in ligne:
                 if cel.comment:
                     cel.comment.width, cel.comment.height = dimensionne(cel.comment.text)
+                    colonnes.setdefault(cel.column, _largeur_colonne_px(ws, cel.column))
+                    lignes.setdefault(cel.row, _hauteur_ligne_px(ws, cel.row))
+        if colonnes or lignes:
+            dimensions_feuilles[ws.title] = {"colonnes": colonnes, "lignes": lignes}
+    return dimensions_feuilles
 
 
-def _vertices_ancrage(ligne0, colonne0, largeur_px, hauteur_px):
+def _vertices_ancrage(ligne0, colonne0, largeur_px, hauteur_px, largeurs_colonnes, hauteurs_lignes):
     """(col_debut, x1, ligne_debut, y1, col_fin, x2, ligne_fin, y2) — même ordre que l'élément
-    `<x:Anchor>` (8 valeurs en pixels, décalages à l'intérieur de la cellule de début/fin)."""
+    `<x:Anchor>` (8 valeurs en pixels, décalages à l'intérieur de la cellule de début/fin).
+    `largeurs_colonnes`/`hauteurs_lignes` : largeur/hauteur réelle (px) par index de colonne/
+    ligne (0-indexé, comme `<x:Column>`/`<x:Row>`), au-delà desquels la valeur par défaut
+    (`_LARGEUR_COLONNE_DEFAUT_PX`/`_HAUTEUR_LIGNE_DEFAUT_PX`) sert de repli."""
     x1, y1 = _DECALAGE_X_DEFAUT_PX, _DECALAGE_Y_DEFAUT_PX
 
     col_fin, reste_largeur = colonne0, largeur_px + x1
-    while reste_largeur >= _LARGEUR_COLONNE_DEFAUT_PX:
-        reste_largeur -= _LARGEUR_COLONNE_DEFAUT_PX
+    while True:
+        largeur_col = largeurs_colonnes.get(col_fin, _LARGEUR_COLONNE_DEFAUT_PX)
+        if reste_largeur < largeur_col:
+            break
+        reste_largeur -= largeur_col
         col_fin += 1
 
     ligne_fin, reste_hauteur = ligne0, hauteur_px + y1
-    while reste_hauteur >= _HAUTEUR_LIGNE_DEFAUT_PX:
-        reste_hauteur -= _HAUTEUR_LIGNE_DEFAUT_PX
+    while True:
+        hauteur_ligne = hauteurs_lignes.get(ligne_fin, _HAUTEUR_LIGNE_DEFAUT_PX)
+        if reste_hauteur < hauteur_ligne:
+            break
+        reste_hauteur -= hauteur_ligne
         ligne_fin += 1
 
     return colonne0, x1, ligne0, y1, col_fin, reste_largeur, ligne_fin, reste_hauteur
 
 
-def _injecte_ancrage_vml(donnees_vml):
+def _injecte_ancrage_vml(donnees_vml, largeurs_colonnes, hauteurs_lignes):
     racine = ET.fromstring(donnees_vml)
     for forme in racine.findall(f".//{{{_VMLNS}}}shape"):
         if forme.get("type") != _TYPE_BULLE_COMMENTAIRE:
@@ -150,7 +197,15 @@ def _injecte_ancrage_vml(donnees_vml):
             continue
 
         largeur_px, hauteur_px = int(correspondance.group(1)), int(correspondance.group(2))
-        vertices = _vertices_ancrage(int(ligne_el.text), int(colonne_el.text), largeur_px, hauteur_px)
+        ligne0, colonne0 = int(ligne_el.text), int(colonne_el.text)
+        # colonne0/ligne0 sont 0-indexées (comme <x:Column>/<x:Row>) ; largeurs_colonnes/
+        # hauteurs_lignes (venus de recalcule_toutes_les_notes) sont indexées par cel.column/
+        # cel.row d'openpyxl, 1-indexées — d'où le +1 ci-dessous.
+        vertices = _vertices_ancrage(
+            ligne0, colonne0, largeur_px, hauteur_px,
+            {c - 1: px for c, px in largeurs_colonnes.items()},
+            {r - 1: px for r, px in hauteurs_lignes.items()},
+        )
 
         ancrage = ET.SubElement(donnees_client, f"{{{_EXCELNS}}}Anchor")
         ancrage.text = ", ".join(str(v) for v in vertices)
@@ -185,25 +240,82 @@ def _applique_police_comments_xml(donnees_xml):
     return ET.tostring(racine, xml_declaration=False)
 
 
-def corrige_ancrage_apres_sauvegarde(contenu_xlsx):
+_RNS = "http://schemas.openxmlformats.org/package/2006/relationships"
+_ROFFNS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def _vml_par_feuille(zin):
+    """{nom_de_feuille: chemin_du_vmlDrawing} — suit la chaîne de relations OOXML (workbook.xml
+    -> workbook.xml.rels -> sheetN.xml -> sheetN.xml.rels), seul moyen fiable de savoir à
+    quelle feuille appartient tel `xl/drawings/*.vml` (l'ordre de numérotation des fichiers ne
+    correspond pas forcément à l'ordre des feuilles, par ex. quand une feuille n'a pas de
+    commentaire)."""
+    racine_wb = ET.fromstring(zin.read("xl/workbook.xml"))
+    nom_par_rid = {
+        feuille.get("r:id") or feuille.get(f"{{{_ROFFNS}}}id"): feuille.get("name")
+        for feuille in racine_wb.findall(f".//{{{_SMLNS}}}sheet")
+    }
+
+    racine_rels = ET.fromstring(zin.read("xl/_rels/workbook.xml.rels"))
+    chemin_sheet_par_rid = {
+        rel.get("Id"): rel.get("Target").lstrip("/")
+        for rel in racine_rels.findall(f"{{{_RNS}}}Relationship")
+        if rel.get("Target", "").split("/")[-1].startswith("sheet")
+    }
+
+    resultat = {}
+    for rid, nom_feuille in nom_par_rid.items():
+        chemin_sheet = chemin_sheet_par_rid.get(rid)
+        if not chemin_sheet:
+            continue
+        chemin_sheet = chemin_sheet if chemin_sheet.startswith("xl/") else f"xl/{chemin_sheet}"
+        dossier, fichier = chemin_sheet.rsplit("/", 1)
+        chemin_rels = f"{dossier}/_rels/{fichier}.rels"
+        if chemin_rels not in zin.namelist():
+            continue
+        racine_sheet_rels = ET.fromstring(zin.read(chemin_rels))
+        for rel in racine_sheet_rels.findall(f"{{{_RNS}}}Relationship"):
+            if rel.get("Type", "").endswith("/vmlDrawing"):
+                cible = rel.get("Target").lstrip("/")
+                resultat[nom_feuille] = cible if cible.startswith("xl/") else f"xl/{cible}"
+    return resultat
+
+
+def corrige_ancrage_apres_sauvegarde(contenu_xlsx, dimensions_feuilles=None):
     """contenu_xlsx : bytes d'un .xlsx déjà sauvegardé (par openpyxl, dernière sauvegarde du
-    pipeline). Renvoie de nouveaux bytes : `<x:Anchor>` injecté dans chaque `xl/drawings/*.vml`
-    (taille de bulle respectée par Excel desktop) ET police fixée dans chaque
+    pipeline). `dimensions_feuilles` : renvoyé par `recalcule_toutes_les_notes()` (largeurs de
+    colonnes/hauteurs de lignes réelles, par feuille) — `None` ou `{}` revient aux valeurs par
+    défaut d'Excel pour toutes les colonnes/lignes (comportement d'origine, approximatif si le
+    fichier a des largeurs personnalisées). Renvoie de nouveaux bytes : `<x:Anchor>` injecté
+    dans chaque `xl/drawings/*.vml` (taille de bulle respectée par Excel desktop, avec les
+    vraies dimensions de colonnes/lignes de SA feuille) ET police fixée dans chaque
     `xl/comments/*.xml` (voir docstring du module) — openpyxl n'offre aucune API pour écrire ni
     l'un ni l'autre directement. Si le classeur n'a aucun commentaire (donc aucun .vml), renvoie
     `contenu_xlsx` inchangé."""
+    dimensions_feuilles = dimensions_feuilles or {}
     with zipfile.ZipFile(io.BytesIO(contenu_xlsx), "r") as zin:
         noms_vml = [n for n in zin.namelist() if n.startswith("xl/drawings/") and n.endswith(".vml")]
         if not noms_vml:
             return contenu_xlsx
         noms_comments = [n for n in zin.namelist() if n.startswith("xl/comments/") and n.endswith(".xml")]
 
+        try:
+            vml_par_feuille = _vml_par_feuille(zin)
+        except (KeyError, ET.ParseError):
+            vml_par_feuille = {}  # structure inattendue : repli sur les valeurs par défaut
+        dimensions_par_vml = {
+            chemin_vml: dimensions_feuilles.get(nom_feuille, {})
+            for nom_feuille, chemin_vml in vml_par_feuille.items()
+        }
+
         tampon = io.BytesIO()
         with zipfile.ZipFile(tampon, "w", zipfile.ZIP_DEFLATED) as zout:
             for item in zin.infolist():
                 donnees = zin.read(item.filename)
                 if item.filename in noms_vml:
-                    donnees = _injecte_ancrage_vml(donnees)
+                    dims = dimensions_par_vml.get(item.filename, {})
+                    donnees = _injecte_ancrage_vml(
+                        donnees, dims.get("colonnes", {}), dims.get("lignes", {}))
                 elif item.filename in noms_comments:
                     donnees = _applique_police_comments_xml(donnees)
                 zout.writestr(item, donnees)
