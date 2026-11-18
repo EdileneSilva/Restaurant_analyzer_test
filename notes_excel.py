@@ -1,6 +1,6 @@
 """
-Corrige deux limitations d'openpyxl sur la TAILLE des bulles de commentaire Excel (jamais la
-police ni le texte lui-même — hors périmètre ici).
+Corrige trois limitations d'openpyxl sur l'APPARENCE des bulles de commentaire Excel : taille,
+ancrage Excel desktop, et police.
 
 1. openpyxl ne conserve PAS `comment.width`/`comment.height` quand il RELIT un fichier déjà
    sauvegardé : vérifié directement (sauvegarder une bulle avec width=320/height=150, la
@@ -26,6 +26,14 @@ police ni le texte lui-même — hors périmètre ici).
    que le texte ne soit plus coupé, contre une bulle fixe quelle que soit la taille demandée
    actuellement.
 
+3. openpyxl n'offre aucun moyen de choisir la police du TEXTE d'un commentaire (`Comment`
+   n'écrit jamais de run enrichi `<r><rPr>...` dans `xl/comments/*.xml`, seulement un `<t>` nu
+   — l'affichage dépend alors du réglage "police des commentaires" de l'Excel de la personne
+   qui ouvre le fichier). Demandé par l'utilisatrice le 2026-11-18 : Calibri 8 pt, fixe, quel
+   que soit le réglage de qui ouvre le fichier — et une bulle plus compacte en conséquence.
+   `corrige_ancrage_apres_sauvegarde()` réécrit aussi chaque `xl/comments/*.xml` pour
+   envelopper le texte dans un run avec cette police.
+
 Utilisation (dans le script qui sauvegarde le classeur en dernier) :
 
     import notes_excel
@@ -43,7 +51,11 @@ import xml.etree.ElementTree as ET  # stdlib — évite d'ajouter lxml à requir
 
 _VMLNS = "urn:schemas-microsoft-com:vml"
 _EXCELNS = "urn:schemas-microsoft-com:office:excel"
+_SMLNS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_XMLNS_ESPACE = "{http://www.w3.org/XML/1998/namespace}space"
 _TYPE_BULLE_COMMENTAIRE = "#_x0000_t202"
+
+ET.register_namespace("", _SMLNS)  # réécrit `xl/comments/*.xml` sans préfixe "ns0:", comme Excel
 
 # Mêmes valeurs par défaut qu'Excel pour une colonne/ligne non redimensionnée à la main
 # (confirmé par le calcul de XlsxWriter : colonne = largeur par défaut 8.43 caractères ->
@@ -54,6 +66,31 @@ _DECALAGE_X_DEFAUT_PX = 15
 _DECALAGE_Y_DEFAUT_PX = 10
 
 _RE_TAILLE_STYLE = re.compile(r"width:(\d+)px;height:(\d+)px")
+
+# Police fixe des commentaires — demandé par l'utilisatrice le 2026-11-18 (au lieu du réglage
+# par défaut d'Excel, variable d'un poste à l'autre). La taille de bulle ci-dessous est
+# recalculée pour cette police/taille : largeur de caractère ~7px à 11 pt (constante utilisée
+# par XlsxWriter pour Calibri 11, voir plus haut), mise à l'échelle linéairement pour 8 pt ->
+# ~5,1 px/caractère. Proportion ajustée le 2026-11-18 (même jour) à la demande de
+# l'utilisatrice : bulle plus étroite et plus haute (moins large, plus de lignes visibles)
+# plutôt que la même largeur réduite uniformément — à valider visuellement dans Excel (elle
+# peut redemander d'ajuster ces 4 constantes si besoin).
+NOM_POLICE = "Calibri"
+TAILLE_POLICE_PT = 8
+_LARGEUR_BULLE_PX = 200
+_CARACTERES_PAR_LIGNE = 39
+_HAUTEUR_BASE_PX = 75
+_HAUTEUR_PAR_LIGNE_PX = 16
+
+
+def dimensions_commentaire(texte):
+    """Taille de bulle (largeur, hauteur) adaptée à la longueur du texte, pour la police/taille
+    fixées ci-dessus (`NOM_POLICE`/`TAILLE_POLICE_PT`) — seule source de ces 4 constantes,
+    reprise par les `_dimensions_commentaire()` locaux de `pretraitement.py`,
+    `audit_general.py` et `audit_general_commentaires.py`."""
+    nb_lignes = sum(max(1, -(-len(p) // _CARACTERES_PAR_LIGNE)) for p in texte.split("\n"))
+    hauteur = max(_HAUTEUR_BASE_PX, nb_lignes * _HAUTEUR_PAR_LIGNE_PX + 18)
+    return _LARGEUR_BULLE_PX, hauteur
 
 
 def recalcule_toutes_les_notes(wb, dimensionne):
@@ -116,17 +153,41 @@ def _injecte_ancrage_vml(donnees_vml):
     return ET.tostring(racine, xml_declaration=False)
 
 
+def _applique_police_comments_xml(donnees_xml):
+    """Enveloppe le texte nu (`<t>`) de chaque commentaire dans un run (`<r><rPr>...`) avec la
+    police fixée par `NOM_POLICE`/`TAILLE_POLICE_PT`, pour qu'elle ne dépende plus du réglage
+    de l'Excel de qui ouvre le fichier (openpyxl n'écrit jamais ce run : voir docstring du
+    module)."""
+    racine = ET.fromstring(donnees_xml)
+    for texte_el in racine.findall(f".//{{{_SMLNS}}}comment/{{{_SMLNS}}}text"):
+        t_el = texte_el.find(f"{{{_SMLNS}}}t")
+        if t_el is None:
+            continue  # déjà en run(s), rien à faire
+        texte = t_el.text or ""
+        texte_el.remove(t_el)
+        r_el = ET.SubElement(texte_el, f"{{{_SMLNS}}}r")
+        rpr_el = ET.SubElement(r_el, f"{{{_SMLNS}}}rPr")
+        ET.SubElement(rpr_el, f"{{{_SMLNS}}}sz").set("val", str(TAILLE_POLICE_PT))
+        ET.SubElement(rpr_el, f"{{{_SMLNS}}}rFont").set("val", NOM_POLICE)
+        ET.SubElement(rpr_el, f"{{{_SMLNS}}}family").set("val", "2")
+        nouveau_t = ET.SubElement(r_el, f"{{{_SMLNS}}}t")
+        nouveau_t.text = texte
+        nouveau_t.set(_XMLNS_ESPACE, "preserve")
+    return ET.tostring(racine, xml_declaration=False)
+
+
 def corrige_ancrage_apres_sauvegarde(contenu_xlsx):
     """contenu_xlsx : bytes d'un .xlsx déjà sauvegardé (par openpyxl, dernière sauvegarde du
-    pipeline). Renvoie de nouveaux bytes, avec `<x:Anchor>` injecté dans chaque
-    `xl/drawings/*.vml` (bulles de commentaire) — seule façon de faire respecter la taille des
-    bulles par Excel desktop (voir docstring du module) ; openpyxl n'offre aucune API pour
-    écrire cet élément directement. Si le classeur n'a aucun commentaire (donc aucun .vml),
-    renvoie `contenu_xlsx` inchangé."""
+    pipeline). Renvoie de nouveaux bytes : `<x:Anchor>` injecté dans chaque `xl/drawings/*.vml`
+    (taille de bulle respectée par Excel desktop) ET police fixée dans chaque
+    `xl/comments/*.xml` (voir docstring du module) — openpyxl n'offre aucune API pour écrire ni
+    l'un ni l'autre directement. Si le classeur n'a aucun commentaire (donc aucun .vml), renvoie
+    `contenu_xlsx` inchangé."""
     with zipfile.ZipFile(io.BytesIO(contenu_xlsx), "r") as zin:
         noms_vml = [n for n in zin.namelist() if n.startswith("xl/drawings/") and n.endswith(".vml")]
         if not noms_vml:
             return contenu_xlsx
+        noms_comments = [n for n in zin.namelist() if n.startswith("xl/comments/") and n.endswith(".xml")]
 
         tampon = io.BytesIO()
         with zipfile.ZipFile(tampon, "w", zipfile.ZIP_DEFLATED) as zout:
@@ -134,5 +195,7 @@ def corrige_ancrage_apres_sauvegarde(contenu_xlsx):
                 donnees = zin.read(item.filename)
                 if item.filename in noms_vml:
                     donnees = _injecte_ancrage_vml(donnees)
+                elif item.filename in noms_comments:
+                    donnees = _applique_police_comments_xml(donnees)
                 zout.writestr(item, donnees)
     return tampon.getvalue()

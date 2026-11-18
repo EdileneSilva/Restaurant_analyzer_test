@@ -406,12 +406,10 @@ def _dimensions_commentaire(texte):
     """Taille de bulle de commentaire Excel adaptée à la longueur du texte — demandé par
     l'utilisatrice le 2026-11-13 : la personne qui ouvre le fichier doit voir le texte COMPLET
     tout de suite en survolant la cellule, sans avoir à agrandir la bulle à la main à chaque
-    fois. openpyxl pose sinon une taille fixe (79 x 144 points) quel que soit le texte."""
-    largeur = 320
-    caracteres_par_ligne = 58
-    nb_lignes = sum(max(1, -(-len(p) // caracteres_par_ligne)) for p in texte.split("\n"))
-    hauteur = max(79, nb_lignes * 14 + 20)
-    return largeur, hauteur
+    fois. openpyxl pose sinon une taille fixe (79 x 144 points) quel que soit le texte.
+    Formule centralisée dans `notes_excel.py` (avec la police fixe des commentaires,
+    demandée le 2026-11-18)."""
+    return notes_excel.dimensions_commentaire(texte)
 
 
 def _pose_commentaire(cel, texte):
