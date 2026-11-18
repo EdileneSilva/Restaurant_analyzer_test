@@ -68,17 +68,20 @@ _DECALAGE_Y_DEFAUT_PX = 10
 _RE_TAILLE_STYLE = re.compile(r"width:(\d+)px;height:(\d+)px")
 
 # Police fixe des commentaires — demandé par l'utilisatrice le 2026-11-18 (au lieu du réglage
-# par défaut d'Excel, variable d'un poste à l'autre). La taille de bulle ci-dessous est
-# recalculée pour cette police/taille : largeur de caractère ~7px à 11 pt (constante utilisée
-# par XlsxWriter pour Calibri 11, voir plus haut), mise à l'échelle linéairement pour 8 pt ->
-# ~5,1 px/caractère. Proportion ajustée le 2026-11-18 (même jour) à la demande de
-# l'utilisatrice : bulle plus étroite et plus haute (moins large, plus de lignes visibles)
-# plutôt que la même largeur réduite uniformément — à valider visuellement dans Excel (elle
-# peut redemander d'ajuster ces 4 constantes si besoin).
+# par défaut d'Excel, variable d'un poste à l'autre). Taille de bulle recalculée pour cette
+# police/taille à partir d'un point de calibration réel, pas d'une estimation générique :
+# l'utilisatrice a confirmé que l'ANCIENNE bulle (320 px, 58 caractères/ligne, voir règle n°60)
+# s'affichait jusque-là en Calibri 11 — donc ~320/58 ≈ 5,52 px/caractère à 11 pt. Mis à
+# l'échelle linéairement pour 8 pt : ~5,52 × 8/11 ≈ 4,01 px/caractère (PAS 7 px/caractère, la
+# largeur du chiffre '0' utilisée ailleurs dans ce module pour l'ancrage Excel desktop — les
+# lettres d'un texte normal sont en moyenne plus étroites qu'un chiffre). Proportion ajustée le
+# 2026-11-18 (même jour) à la demande de l'utilisatrice : bulle plus étroite et plus haute
+# (moins large, plus de lignes visibles) plutôt qu'une réduction uniforme — à valider
+# visuellement dans Excel (elle peut redemander d'ajuster ces 4 constantes si besoin).
 NOM_POLICE = "Calibri"
 TAILLE_POLICE_PT = 8
 _LARGEUR_BULLE_PX = 200
-_CARACTERES_PAR_LIGNE = 39
+_CARACTERES_PAR_LIGNE = 50  # 200 px / ~4,01 px par caractère à 8 pt
 _HAUTEUR_BASE_PX = 75
 _HAUTEUR_PAR_LIGNE_PX = 16
 
