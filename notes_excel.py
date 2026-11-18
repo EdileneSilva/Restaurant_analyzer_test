@@ -92,8 +92,10 @@ _RE_TAILLE_STYLE = re.compile(r"width:(\d+)px;height:(\d+)px")
 # seule la hauteur était en cause, pas la largeur de caractère.
 NOM_POLICE = "Calibri"
 TAILLE_POLICE_PT = 9
-_LARGEUR_BULLE_PX = 150
-_CARACTERES_PAR_LIGNE = 33  # 150 px / ~4,5 px par caractère à 9 pt
+# Largeur augmentée d'au moins 25% le 2026-11-18 (même jour), demande explicite de
+# l'utilisatrice (150 -> 188, +25,3%) — caractères/ligne recalculés dans la même proportion.
+_LARGEUR_BULLE_PX = 188
+_CARACTERES_PAR_LIGNE = 41  # 188 px / ~4,5 px par caractère à 9 pt
 # Hauteur par ligne/de base : la division par ~2 de la règle n°72 (7 px/ligne) s'est avérée
 # insuffisante une fois la largeur corrigée par colonne réelle (règle n°73) — 7 px est bien en
 # dessous de la hauteur minimale d'une ligne de texte à 9 pt (~12-14 px). Avant la règle n°73,

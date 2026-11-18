@@ -1466,6 +1466,17 @@ hauteur de ligne réel, pour éviter un 3e aller-retour.
 Les 3 suites de non-régression passent sans changement de total. Docker reconstruit, HTTP 200
 vérifié.
 
+### 75. Largeur de bulle augmentée de 25% (demande explicite, sans attendre de test de l'assistant)
+
+Demandé par l'utilisatrice le 2026-11-18 (même jour), après la règle n°74 : augmenter la
+largeur d'au moins 25%, en précisant qu'elle valide elle-même visuellement (pas besoin de
+nouveau test détaillé de l'assistant avant publication). `_LARGEUR_BULLE_PX` 150→188 (+25,3%),
+`_CARACTERES_PAR_LIGNE` recalculé dans la même proportion (33→41, même ~4,5 px/caractère à
+9 pt). Hauteur (règle n°74) inchangée.
+
+Les 3 suites de non-régression passent sans changement de total. Docker reconstruit, HTTP 200
+vérifié.
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
