@@ -147,10 +147,10 @@ def calcule_resultats(fichiers):
         noms, classeurs_valeurs, classeurs, contenus_transformes, flags_transforme
     ):
         resultats = audit.audite_classeur(wb_valeurs, wb, indice_prix)
-        notes_excel.recalcule_toutes_les_notes(wb, audit._dimensions_commentaire)
+        dimensions_feuilles = notes_excel.recalcule_toutes_les_notes(wb, audit._dimensions_commentaire)
         tampon_xlsx = io.BytesIO()
         wb.save(tampon_xlsx)
-        xlsx_bytes = notes_excel.corrige_ancrage_apres_sauvegarde(tampon_xlsx.getvalue())
+        xlsx_bytes = notes_excel.corrige_ancrage_apres_sauvegarde(tampon_xlsx.getvalue(), dimensions_feuilles)
         fichiers_resultat.append({
             "nom": nom_fichier,
             "resultats": resultats,

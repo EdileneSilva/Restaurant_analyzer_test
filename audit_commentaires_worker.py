@@ -42,11 +42,11 @@ def main():
 
     for nom, wb_valeurs, wb in zip(noms, classeurs_valeurs, classeurs):
         resultats = audit.audite_classeur(wb_valeurs, wb, indice_prix)
-        notes_excel.recalcule_toutes_les_notes(wb, audit._dimensions_commentaire)
+        dimensions_feuilles = notes_excel.recalcule_toutes_les_notes(wb, audit._dimensions_commentaire)
         tampon = io.BytesIO()
         wb.save(tampon)
         with open(os.path.join(dossier_sortie, nom), "wb") as f:
-            f.write(notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue()))
+            f.write(notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue(), dimensions_feuilles))
         resume = [{"nom": r["nom"], "stats": r["stats"], "categories": r["categories"]}
                   for r in resultats]
         with open(os.path.join(dossier_sortie, nom + ".json"), "w", encoding="utf-8") as f:

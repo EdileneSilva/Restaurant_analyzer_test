@@ -205,10 +205,10 @@ def complete_colonnes_canonique_incomplet(chemin_source, chemin_sortie):
                 1 for r in range(ligne_entete + 1, ws.max_row + 1)
                 if col_designation and ws.cell(row=r, column=col_designation).value)
             premiere_feuille_traitee = True
-    notes_excel.recalcule_toutes_les_notes(wb, pt._dimensions_commentaire)
+    dimensions_feuilles = notes_excel.recalcule_toutes_les_notes(wb, pt._dimensions_commentaire)
     tampon = io.BytesIO()
     wb.save(tampon)
-    conteudo = notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue())
+    conteudo = notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue(), dimensions_feuilles)
     if hasattr(chemin_sortie, "write"):
         chemin_sortie.seek(0)
         chemin_sortie.truncate()

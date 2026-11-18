@@ -4306,11 +4306,11 @@ def main():
                 f.write(resultat["rapport"])
 
         chemin_sortie = os.path.join(DOSSIER_SORTIE, f"{nom_base} - audit_commenté.xlsx")
-        notes_excel.recalcule_toutes_les_notes(wb, _dimensions_commentaire)
+        dimensions_feuilles = notes_excel.recalcule_toutes_les_notes(wb, _dimensions_commentaire)
         tampon = io.BytesIO()
         wb.save(tampon)
         with open(chemin_sortie, "wb") as f:
-            f.write(notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue()))
+            f.write(notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue(), dimensions_feuilles))
         print(f"  Fichier enregistré : {chemin_sortie}")
 
     print("\nTerminé. Seules les corrections mécaniques (sans aucune décision de contenu) sont "

@@ -583,10 +583,10 @@ def ecrit_classeur_canonique(lignes, chemin_sortie, nom_feuille):
     if lignes:
         _applique_grille_complete(ws_dst, 3, 2 + len(lignes))
 
-    notes_excel.recalcule_toutes_les_notes(wb_dst, _dimensions_commentaire)
+    dimensions_feuilles = notes_excel.recalcule_toutes_les_notes(wb_dst, _dimensions_commentaire)
     tampon = io.BytesIO()
     wb_dst.save(tampon)
-    conteudo = notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue())
+    conteudo = notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue(), dimensions_feuilles)
     if hasattr(chemin_sortie, "write"):
         chemin_sortie.seek(0)
         chemin_sortie.truncate()

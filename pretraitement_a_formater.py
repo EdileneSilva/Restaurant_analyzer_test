@@ -553,10 +553,10 @@ def _ajoute_commentaires_local(chemin_sortie, lignes):
     ws = wb.active
     for i, commentaire in a_commenter:
         pt._pose_commentaire(ws.cell(row=i + 3, column=pt.COL_LOCAL), commentaire)
-    notes_excel.recalcule_toutes_les_notes(wb, pt._dimensions_commentaire)
+    dimensions_feuilles = notes_excel.recalcule_toutes_les_notes(wb, pt._dimensions_commentaire)
     tampon = io.BytesIO()
     wb.save(tampon)
-    conteudo = notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue())
+    conteudo = notes_excel.corrige_ancrage_apres_sauvegarde(tampon.getvalue(), dimensions_feuilles)
     if hasattr(chemin_sortie, "write"):
         chemin_sortie.seek(0)
         chemin_sortie.truncate()
