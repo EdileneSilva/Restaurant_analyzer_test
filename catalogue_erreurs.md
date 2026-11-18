@@ -1477,6 +1477,17 @@ nouveau test détaillé de l'assistant avant publication). `_LARGEUR_BULLE_PX` 1
 Les 3 suites de non-régression passent sans changement de total. Docker reconstruit, HTTP 200
 vérifié.
 
+### 76. Largeur encore trop étroite après la règle n°75 : +25% supplémentaire ; hauteur +10%
+
+Signalé par l'utilisatrice le 2026-11-18 (même jour), toujours trop étroit après la règle n°75
+: nouvelle augmentation de 25% (`_LARGEUR_BULLE_PX` 188→235), `_CARACTERES_PAR_LIGNE` recalculé
+dans la même proportion (41→51). Hauteur (règle n°74) augmentée de 10% en plus, également
+demandé explicitement : `_HAUTEUR_BASE_PX` 60→66, `_HAUTEUR_PAR_LIGNE_PX`/
+`_HAUTEUR_SURCHARGE_PX` 13→14.
+
+Les 3 suites de non-régression passent sans changement de total. Docker reconstruit, HTTP 200
+vérifié.
+
 Les 7 fichiers de `pret_pour_audit/` (5x "Base article groupement" + "Base article
 groupement commun" + "MDC_IMPORT_MARCHE") ont des résultats connus et stables. **Valeurs
 actuelles (2026-11-09, après toutes les règles ci-dessus, y compris la dernière du
