@@ -2,7 +2,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-calc \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libreoffice-calc fonts-crosextra-carlito \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
